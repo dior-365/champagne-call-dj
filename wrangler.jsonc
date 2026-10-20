@@ -1,0 +1,8 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "champagne-call-dj",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-09-01",
+  "assets": { "directory": ".", "binding": "ASSETS" },
+  "r2_buckets": [{ "binding": "AUDIO", "bucket_name": "champagne-dj-audio" }]
+}
