@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#150a12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="コールDJ">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/favicon-64.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<title>シャンパンコールDJ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+html{background:#150a12}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+[hidden]{display:none!important}
+img{max-width:100%}
+/* Layout: one column — call cards (each holding TRACK 1..n), a 4-fader touch mixer, then the SFX pad grid; a stop strip is fixed to the bottom */
+:root{
+  --bg:#150a12;
+  --surface:#22121d;
+  --surface-2:#2e1927;
+  --line:#4a2b3d;
+  --fg:#f6ece4;
+  --muted:#b59aa8;
+  --gold:#e8c37a;
+  --gold-deep:#b98b3e;
+  --rose:#e2577e;
+  --bass:#9d7bff;
+  --ok:#7fd6a4;
+  --font-display:"Dela Gothic One","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  --font-body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:15px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:0 calc(96px + env(safe-area-inset-bottom,0px));-webkit-tap-highlight-color:transparent;overflow-x:hidden}
+#fizz{position:fixed;inset:0;pointer-events:none;z-index:0}
+main{position:relative;z-index:1;max-width:880px;margin:0 auto;display:flex;flex-direction:column;gap:28px;padding-top:20px}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.hright{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+h1{font-family:var(--font-display);font-weight:400;font-size:clamp(26px,7vw,40px);line-height:1.1;margin:0;letter-spacing:.02em;text-wrap:balance}
+h1 span{color:var(--gold)}
+.sub{color:var(--muted);font-size:13px;margin:4px 0 0}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.chip::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.chip.cloud{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,var(--line))}
+.chip.cloud::before{background:var(--ok)}
+.chip.view{color:var(--gold)}
+.chip.view::before{background:var(--gold)}
+.meter{width:120px;height:10px;border-radius:5px;background:var(--surface-2);overflow:hidden;border:1px solid var(--line)}
+.meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--gold-deep),var(--gold),var(--rose))}
+h2{font-family:var(--font-display);font-weight:400;font-size:18px;margin:0;letter-spacing:.04em}
+.label{font-size:11px;letter-spacing:.14em;color:var(--muted)}
+section{display:flex;flex-direction:column;gap:12px}
+.sec-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.ctrls{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;color:inherit;cursor:pointer;border:none;background:none}
+button:focus-visible,label.btn:focus-within,.fader:focus-visible,input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:42px;padding:0 14px;border-radius:10px;
+  background:var(--surface-2);border:1px solid var(--line);font-weight:700;font-size:14px;cursor:pointer;user-select:none;white-space:nowrap}
+.btn.sm{min-height:36px;padding:0 12px;font-size:13px}
+.btn:active{transform:scale(.97)}
+.btn.gold{background:var(--gold);color:#2a1508;border-color:var(--gold)}
+.btn.live{background:var(--rose);border-color:var(--rose);color:#fff}
+.btn.on{border-color:var(--gold);color:var(--gold)}
+.btn.danger{color:var(--rose);border-color:var(--rose)}
+.btn.danger.arm{background:var(--rose);color:#fff}
+.empty{color:var(--muted);font-size:14px;border:1px dashed var(--line);border-radius:14px;padding:22px 16px;text-align:center;grid-column:1/-1}
+.rename{width:100%;min-width:0;font:inherit;font-weight:700;color:var(--fg);background:var(--bg);border:1px solid var(--gold-deep);border-radius:8px;padding:6px 8px;font-size:14px}
+/* Call cards */
+.calls{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+@media (min-width:720px){.calls{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.call{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.call.live{border-color:var(--gold-deep)}
+.call-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;min-width:0}
+.call-name{font-family:var(--font-display);font-weight:400;font-size:19px;margin:0;line-height:1.3;min-width:0;overflow-wrap:anywhere}
+.call.live .call-name{color:var(--gold)}
+.call-head .rename{flex:1 1 160px;font-size:16px;padding:8px 10px}
+.trks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.trk{position:relative;min-height:92px;border-radius:12px;border:1px solid var(--line);background:linear-gradient(160deg,var(--surface-2),var(--surface));
+  display:flex;flex-direction:column;justify-content:space-between;gap:4px;padding:10px;text-align:left;overflow:hidden;touch-action:manipulation;user-select:none;-webkit-user-select:none;min-width:0;transition:transform .06s}
+button.trk:active{transform:scale(.96)}
+.trk .tl{font-family:var(--font-display);font-size:15px;letter-spacing:.04em}
+.trk .tl b{font-weight:400;font-size:22px;margin-left:2px}
+.trk .fn{font-size:12px;color:var(--fg);opacity:.75;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.trk .dur{font-family:var(--font-mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.trk.playing{border-color:var(--gold);background:linear-gradient(160deg,#4a3018,#2a170f)}
+.trk.playing .tl{color:var(--gold)}
+.trk.missing{opacity:.5}
+.trk .bar{position:absolute;left:0;bottom:0;height:4px;width:0;background:var(--gold)}
+/* SFX pads */
+.pads{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media (min-width:640px){.pads{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.pad{position:relative;aspect-ratio:1/1;max-width:100%;border-radius:16px;border:1px solid var(--line);background:radial-gradient(120% 90% at 30% 20%,var(--surface-2),var(--surface));
+  display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:14px;text-align:left;overflow:hidden;touch-action:manipulation;user-select:none;-webkit-user-select:none;min-width:0;transition:transform .06s,border-color .2s}
+button.pad:active{transform:scale(.96)}
+.pad .nm{font-family:var(--font-display);font-size:clamp(15px,4.2vw,19px);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;word-break:break-all}
+.meta{display:flex;justify-content:space-between;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pad.active{border-color:var(--gold)}
+.pad.hit{animation:hit .45s ease-out}
+@keyframes hit{0%{box-shadow:0 0 0 0 var(--gold),inset 0 0 44px var(--gold)}100%{box-shadow:0 0 0 14px transparent,inset 0 0 0 transparent}}
+.del{position:absolute;top:6px;right:6px;width:30px;height:30px;border-radius:50%;background:var(--rose);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;z-index:2}
+.editing .trk,.editing .pad{border-style:dashed}
+.editing .trk{padding-top:12px}
+/* Mixer */
+.mixer{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px 10px 12px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.fader{display:flex;flex-direction:column;align-items:center;gap:8px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:ns-resize;min-width:0;border-radius:10px}
+.fv{font-family:var(--font-mono);font-size:13px;color:var(--gold);font-variant-numeric:tabular-nums;min-height:1.4em}
+.fader[data-k=bass] .fv{color:var(--bass)}
+.rail{position:relative;width:56px;max-width:100%;height:200px;border-radius:14px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
+.rail .fill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(0deg,var(--gold-deep),var(--gold));opacity:.85}
+.fader[data-k=bass] .fill{background:linear-gradient(0deg,#5b3fc4,var(--bass))}
+.rail .zero{position:absolute;left:6px;right:6px;top:50%;height:2px;background:var(--line)}
+.rail .thumb{position:absolute;left:4px;right:4px;height:14px;border-radius:7px;background:var(--fg);box-shadow:0 2px 8px rgba(0,0,0,.5);transform:translateY(50%)}
+.fl{font-weight:700;font-size:13px;text-align:center}
+.mix-note{grid-column:1/-1;color:var(--muted);font-size:12px;text-align:center;margin:4px 0 0}
+.hint{color:var(--muted);font-size:12px;margin:0}
+.strip{position:fixed;left:0;right:0;bottom:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);
+  border-top:1px solid var(--line);padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.strip .in{max-width:880px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.strip .btn{white-space:normal;line-height:1.2;font-size:13px}
+.toast{position:fixed;left:50%;top:calc(16px + env(safe-area-inset-top,0px));transform:translateX(-50%);background:var(--gold);color:#2a1508;font-weight:700;
+  padding:8px 16px;border-radius:999px;z-index:9;font-size:14px;transition:opacity .3s;opacity:0;pointer-events:none;max-width:90vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toast.show{opacity:1}
+@media (prefers-reduced-motion:reduce){.pad.hit{animation:none}}
+</style>
+</head>
+<body>
+
+<canvas id="fizz"></canvas>
+<div class="toast" id="toast"></div>
+<input type="file" id="addTrackFile" accept="audio/*" multiple hidden>
+<main>
+  <header>
+    <div>
+      <h1>シャンパン<span>コール</span>DJ</h1>
+      <p class="sub">コールごとにTRACKを並べて、効果音をタップ。低音は指でスライド。</p>
+    </div>
+    <div class="hright">
+      <span class="chip" id="saveChip">読み込み中</span>
+      <button class="btn sm gold" id="installBtn" hidden>アプリとしてインストール</button>
+      <div class="meter" aria-label="出力レベル"><i id="lvl"></i></div>
+    </div>
+  </header>
+
+  <section aria-labelledby="h-call">
+    <div class="sec-head">
+      <h2 id="h-call">コール</h2>
+      <div class="ctrls">
+        <button class="btn" id="modeBtn"></button>
+        <button class="btn editBtn canEdit" aria-pressed="false">編集</button>
+      </div>
+    </div>
+    <div class="ctrls canEdit">
+      <label class="btn gold" for="callFile">＋ コールを追加</label>
+      <input type="file" id="callFile" accept="audio/*" multiple hidden>
+      <label class="btn" for="callDir">フォルダからまとめて</label>
+      <input type="file" id="callDir" webkitdirectory multiple hidden>
+    </div>
+    <div class="calls" id="calls"></div>
+    <p class="hint canEdit">「＋ コールを追加」でTRACKのファイルを2〜3個まとめて選ぶと、1つのコールになります（ファイル名順にTRACK 1, 2, 3）。名前は「編集」からいつでも変えられます。</p>
+  </section>
+
+  <section aria-labelledby="h-mix">
+    <div class="sec-head"><h2 id="h-mix">ミキサー</h2><span class="label">上下にスライド・ダブルタップで初期値</span></div>
+    <div class="mixer" id="mixer"></div>
+  </section>
+
+  <section aria-labelledby="h-sfx">
+    <div class="sec-head">
+      <h2 id="h-sfx">効果音</h2>
+      <div class="ctrls">
+        <button class="btn editBtn canEdit" aria-pressed="false">編集</button>
+        <label class="btn gold canEdit" for="sfxFile">＋ 取り込む</label>
+        <input type="file" id="sfxFile" accept="audio/*" multiple hidden>
+      </div>
+    </div>
+    <div class="pads" id="pads"></div>
+    <p class="hint">連打で重ねて鳴らせます。PCはキー 1〜9 でも鳴ります。</p>
+  </section>
+
+  <section aria-labelledby="h-bk">
+    <div class="sec-head"><h2 id="h-bk">バックアップ</h2><span class="label">別の端末へ音源を移す</span></div>
+    <div class="ctrls">
+      <button class="btn" id="exportBtn">書き出す</button>
+      <label class="btn" for="importFile">読み込む</label>
+      <input type="file" id="importFile" accept=".ccdj,application/octet-stream" hidden>
+    </div>
+    <p class="hint">音源はこの端末の中に保存されます。「書き出す」で全部を1つのファイルにまとめ、別の端末で「読み込む」と同じ状態になります。機種変更の前にも書き出しておいてください。</p>
+    <p class="hint" id="iosHint" hidden>iPhoneでアプリにするには、Safariの共有ボタン →「ホーム画面に追加」を押してください。</p>
+  </section>
+</main>
+
+<div class="strip">
+  <div class="in">
+    <button class="btn" id="sfxStop">効果音を止める</button>
+    <button class="btn" id="fadeBtn">フェードアウト</button>
+    <button class="btn live" id="stopAll">全停止</button>
+  </div>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+const bass = ctx.createBiquadFilter(); bass.type = 'lowshelf'; bass.frequency.value = 110;
+const master = ctx.createGain();
+const lim = ctx.createDynamicsCompressor(); lim.threshold.value = -3; lim.ratio.value = 12; lim.attack.value = .003; lim.release.value = .15;
+const analyser = ctx.createAnalyser(); analyser.fftSize = 512;
+bass.connect(master); master.connect(lim); lim.connect(analyser); analyser.connect(ctx.destination);
+const callBus = ctx.createGain(); callBus.connect(bass);
+let sfxBus = ctx.createGain(); sfxBus.connect(bass);
+const unlock = () => { if (ctx.state !== 'running') ctx.resume(); };
+document.addEventListener('pointerdown', unlock, true);
+document.addEventListener('keydown', unlock, true);
+
+// ---------- helpers ----------
+const ls = { get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const base = n => n.replace(/\.[^.]+$/, '');
+const natural = (a, b) => a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+const isAudio = f => (f.type && f.type.startsWith('audio/')) || /\.(mp3|m4a|aac|wav|ogg|flac|aif|aiff)$/i.test(f.name);
+const decode = async (data, name) => { try { return await ctx.decodeAudioData(data.slice(0)); } catch (e) { toast(`「${name}」は読み込めない形式です`); return null; } };
+const toB64 = ab => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => { const s = fr.result; res(s.slice(s.indexOf(',') + 1)); }; fr.onerror = () => rej(fr.error); fr.readAsDataURL(new Blob([ab])); });
+const fromB64 = s => { const bin = atob(s.trim()); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; };
+
+function openIDB(name, ver, stores) {
+  let p; try { p = new Promise((res, rej) => { const r = indexedDB.open(name, ver);
+    r.onupgradeneeded = () => { const d = r.result; stores.forEach(s => { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' }); }); };
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); } catch (e) { p = Promise.reject(e); } p.catch(() => {}); return p;
+}
+const idb = (dbP, store, mode, fn) => dbP.then(d => new Promise((res, rej) => { const tx = d.transaction(store, mode); const r = fn(tx.objectStore(store)); tx.oncomplete = () => res(r && r.result); tx.onerror = () => rej(tx.error); })).catch(() => null);
+const LDB = openIDB('champagne-dj-v2', 1, ['calls', 'tracks', 'sfx', 'blobs', 'cache']);
+
+// ---------- storage (this device) ----------
+let saveMode = 'local';
+const KINDS = ['calls', 'tracks', 'sfx'];
+const pick = (kind, o) => kind === 'calls' ? { name: o.name, order: o.order }
+  : kind === 'tracks' ? { callId: o.callId, name: o.name, order: o.order, ref: o.ref } : { name: o.name, order: o.order, ref: o.ref };
+const tx = (store, mode, fn) => LDB.then(d => new Promise((res, rej) => { const t = d.transaction(store, mode); const r = fn(t.objectStore(store)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); }));
+const B = {
+  async loadMeta() { const out = {}; for (const k of KINDS) out[k] = (await idb(LDB, k, 'readonly', s => s.getAll())) || []; return out; },
+  saveMeta: (kind, o) => tx(kind, 'readwrite', s => s.put({ id: o.id, ...pick(kind, o) })),
+  delMeta: (kind, id) => tx(kind, 'readwrite', s => s.delete(id)),
+  async putAudio(ab) { const id = uid(); await tx('blobs', 'readwrite', s => s.put({ id, data: ab })); return 'l:' + id; },
+  async getAudio(ref) { if (!ref) return null; const r = await idb(LDB, 'blobs', 'readonly', s => s.get(ref.slice(2))); return r && r.data; },
+  delAudio: ref => ref ? idb(LDB, 'blobs', 'readwrite', s => s.delete(ref.slice(2))) : null,
+};
+const errMsg = e => e && e.name === 'QuotaExceededError' ? '端末の空き容量が足りません。不要な音源を削除してください' : '保存できませんでした。もう一度試してください';
+
+// ---------- state ----------
+let calls = [], sfx = [], editing = false;
+const canEdit = () => true;
+
+async function addTrack(call, file, order) {
+  try {
+    const ab = await file.arrayBuffer(); const buffer = await decode(ab, file.name); if (!buffer) return false;
+    const ref = await B.putAudio(ab);
+    const t = { id: uid(), callId: call.id, name: base(file.name), order, ref, buffer };
+    await B.saveMeta('tracks', t);
+    call.tracks.push(t); call.tracks.sort((a, b) => a.order - b.order); return true;
+  } catch (e) { toast(errMsg(e)); return false; }
+}
+function guessName(names) {
+  if (names.length === 1) return base(names[0]).replace(/[\s_\-.]*(track|tr)?[\s_\-.]*\d+$/i, '').trim() || base(names[0]);
+  let p = names[0]; for (const n of names) while (!n.startsWith(p)) p = p.slice(0, -1);
+  p = p.replace(/[\s_\-.(（]*(track|tr)?[\s_\-.]*\d*$/i, '').trim();
+  return p.length >= 2 ? p : base(names[0]);
+}
+async function importCall(files, name) {
+  files = files.filter(isAudio).sort((a, b) => natural(a.name, b.name)); if (!files.length) return 0;
+  const c = { id: uid(), name: name || guessName(files.map(f => f.name)), order: Date.now(), tracks: [] };
+  try { await B.saveMeta('calls', c); } catch (e) { toast(errMsg(e)); return 0; }
+  calls.push(c); render();
+  let i = 0; for (const f of files) { toast(`保存中: ${f.name}`); if (await addTrack(c, f, i)) i++; render(); }
+  if (!c.tracks.length) { calls.splice(calls.indexOf(c), 1); B.delMeta('calls', c.id).catch(() => {}); render(); return 0; }
+  return 1;
+}
+$('callFile').onchange = async e => { const fs = [...e.target.files]; e.target.value = ''; if (await importCall(fs)) toast(`コールを追加しました（${fs.filter(isAudio).length} TRACK）`); };
+$('callDir').onchange = async e => {
+  const fs = [...e.target.files].filter(isAudio); e.target.value = '';
+  const by = new Map(); fs.forEach(f => { const parts = (f.webkitRelativePath || f.name).split('/'); const dir = parts.length > 1 ? parts[parts.length - 2] : 'コール'; if (!by.has(dir)) by.set(dir, []); by.get(dir).push(f); });
+  let n = 0; for (const [dir, list] of [...by.entries()].sort((a, b) => natural(a[0], b[0]))) n += await importCall(list, dir);
+  toast(n ? `${n}件のコールを追加しました` : '音声ファイルが見つかりませんでした');
+};
+let addTarget = null;
+$('addTrackFile').onchange = async e => {
+  const fs = [...e.target.files].filter(isAudio).sort((a, b) => natural(a.name, b.name)); e.target.value = ''; const c = addTarget; if (!c) return;
+  let o = c.tracks.reduce((m, t) => Math.max(m, t.order), -1) + 1; let n = 0;
+  for (const f of fs) { toast(`保存中: ${f.name}`); if (await addTrack(c, f, o)) { o++; n++; } render(); }
+  if (n) toast(`「${c.name}」にTRACKを追加しました`);
+};
+$('sfxFile').onchange = async e => {
+  const fs = [...e.target.files].filter(isAudio); e.target.value = ''; let n = 0;
+  for (const f of fs) {
+    toast(`保存中: ${f.name}`);
+    try { const ab = await f.arrayBuffer(); const buffer = await decode(ab, f.name); if (!buffer) continue;
+      const it = { id: uid(), name: base(f.name), order: Date.now() + n, ref: await B.putAudio(ab), buffer };
+      await B.saveMeta('sfx', it); sfx.push(it); n++; render();
+    } catch (err) { toast(errMsg(err)); }
+  }
+  if (n) toast(`${n}件の効果音を取り込みました`);
+};
+
+// ---------- load ----------
+async function loadAll() {
+  const m = await B.loadMeta();
+  calls = m.calls.sort((a, b) => (a.order || 0) - (b.order || 0)).map(c => ({ ...c, tracks: [] }));
+  m.tracks.filter(t => calls.some(c => c.id === t.callId)).forEach(t => calls.find(c => c.id === t.callId).tracks.push({ ...t, buffer: null, loading: true }));
+  calls.forEach(c => c.tracks.sort((a, b) => (a.order || 0) - (b.order || 0) || natural(a.name, b.name)));
+  sfx = m.sfx.sort((a, b) => (a.order || 0) - (b.order || 0)).map(x => ({ ...x, buffer: null, loading: true }));
+  render();
+  const all = [...calls.flatMap(c => c.tracks), ...sfx]; let i = 0;
+  const worker = async () => { while (i < all.length) { const it = all[i++]; const ab = await B.getAudio(it.ref); it.buffer = ab ? await decode(ab, it.name) : null; it.loading = false; render(); } };
+  await Promise.all([worker(), worker(), worker()]);
+}
+async function paintChip() {
+  const chip = $('saveChip'); chip.className = 'chip cloud';
+  let t = 'この端末に保存';
+  try { const e = await navigator.storage.estimate(); if (e && e.usage) t += `（${Math.round(e.usage / 1048576)}MB）`; } catch (e) {}
+  chip.textContent = t;
+}
+(async () => {
+  try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
+  try { await loadAll(); } catch (e) { toast('音源を読み込めませんでした。アプリを開き直してください'); render(); }
+  paintChip();
+})();
+
+// ---------- backup (move sounds to another device) ----------
+$('exportBtn').onclick = async () => {
+  const m = await B.loadMeta(); const parts = []; let off = 0;
+  const pack = async list => { const out = []; for (const r of list) { const ab = await B.getAudio(r.ref); if (!ab) continue; out.push({ ...r, ref: undefined, off, len: ab.byteLength }); parts.push(ab); off += ab.byteLength; } return out; };
+  if (!m.calls.length && !m.sfx.length) { toast('書き出す音源がありません'); return; }
+  toast('バックアップを作成中');
+  const head = { v: 1, app: 'champagne-call-dj', at: new Date().toISOString(), calls: m.calls, tracks: await pack(m.tracks), sfx: await pack(m.sfx) };
+  const json = new TextEncoder().encode(JSON.stringify(head)); const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, json.length);
+  const blob = new Blob([new TextEncoder().encode('CCDJ'), len, json, ...parts], { type: 'application/octet-stream' });
+  const d = new Date(); const name = `champagne-dj-backup-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.ccdj`;
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  toast(`書き出しました（${Math.round(blob.size / 1048576)}MB）`);
+};
+$('importFile').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const buf = await f.arrayBuffer(); const u8 = new Uint8Array(buf);
+    if (new TextDecoder().decode(u8.slice(0, 4)) !== 'CCDJ') throw 0;
+    const jl = new DataView(buf).getUint32(4); const head = JSON.parse(new TextDecoder().decode(u8.slice(8, 8 + jl))); const bodyAt = 8 + jl;
+    const cur0 = await B.loadMeta(); const has = (k, id) => cur0[k].some(x => x.id === id);
+    let nc = 0, nt = 0, ns = 0; toast('バックアップを読み込み中');
+    for (const c of head.calls) if (!has('calls', c.id)) { await B.saveMeta('calls', c); nc++; }
+    for (const t of head.tracks) if (!has('tracks', t.id)) { const ref = await B.putAudio(buf.slice(bodyAt + t.off, bodyAt + t.off + t.len)); await B.saveMeta('tracks', { ...t, ref }); nt++; }
+    for (const x of head.sfx) if (!has('sfx', x.id)) { const ref = await B.putAudio(buf.slice(bodyAt + x.off, bodyAt + x.off + x.len)); await B.saveMeta('sfx', { ...x, ref }); ns++; }
+    await loadAll(); paintChip();
+    toast(nt + ns ? `コール${nc}件・TRACK${nt}件・効果音${ns}件を追加しました` : 'すべて取り込み済みでした');
+  } catch (err) { toast(err && err.name === 'QuotaExceededError' ? '端末の空き容量が足りません' : 'このファイルはバックアップとして読み込めません'); }
+};
+
+// ---------- install ----------
+let installEvt = null;
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; $('installBtn').hidden = false; });
+$('installBtn').onclick = async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; $('installBtn').hidden = true; };
+addEventListener('appinstalled', () => { $('installBtn').hidden = true; toast('インストールしました'); });
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+if (!standalone && /iPhone|iPad|iPod/.test(navigator.userAgent)) $('iosHint').hidden = false;
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+
+// ---------- playback ----------
+let cur = null;
+const MODES = { loop: 'リピート', next: '次のTRACKへ', stop: '止める' };
+let endMode = ls.get('endMode', 'loop'); if (!MODES[endMode]) endMode = 'loop';
+const modeBtn = $('modeBtn');
+const paintMode = () => { modeBtn.textContent = '曲の終わり：' + MODES[endMode]; };
+modeBtn.onclick = () => { const k = Object.keys(MODES); endMode = k[(k.indexOf(endMode) + 1) % k.length]; ls.set('endMode', endMode); paintMode(); if (cur) cur.src.loop = endMode === 'loop'; toast('曲の終わり：' + MODES[endMode]); };
+paintMode();
+function playTrack(c, t, fadeIn = .8) {
+  unlock(); if (!t.buffer) return;
+  if (cur && cur.id === t.id) { stopTrack(1.5); return; }
+  stopTrack(1.2);
+  const now = ctx.currentTime;
+  const src = ctx.createBufferSource(); src.buffer = t.buffer; src.loop = endMode === 'loop';
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(1, now + fadeIn);
+  src.connect(g); g.connect(callBus); src.start(now);
+  cur = { id: t.id, cid: c.id, src, g, start: now, dur: t.buffer.duration };
+  src.onended = () => {
+    if (!cur || cur.src !== src) return;
+    if (endMode === 'next') { const nx = c.tracks[c.tracks.indexOf(t) + 1]; if (nx && nx.buffer) { cur = null; playTrack(c, nx, .03); return; } }
+    cur = null; render();
+  };
+  render();
+}
+function stopTrack(fade = .4) {
+  if (!cur) return; const { src, g } = cur; const now = ctx.currentTime;
+  g.gain.cancelScheduledValues(now); g.gain.setValueAtTime(Math.max(g.gain.value, .0001), now); g.gain.exponentialRampToValueAtTime(.0001, now + fade);
+  try { src.stop(now + fade + .05); } catch (e) {} cur = null; render();
+}
+const voices = new Map();
+function fire(it, el) {
+  unlock(); if (!it.buffer) return;
+  const src = ctx.createBufferSource(); src.buffer = it.buffer; src.connect(sfxBus); src.start();
+  voices.set(it.id, (voices.get(it.id) || 0) + 1); el.classList.add('active');
+  src.onended = () => { const n = (voices.get(it.id) || 1) - 1; voices.set(it.id, n); if (!n) { const p = $('pad-' + it.id); if (p) p.classList.remove('active'); } };
+  el.classList.remove('hit'); void el.offsetWidth; el.classList.add('hit'); burst(el);
+}
+function stopSfx() { sfxBus.disconnect(); sfxBus = ctx.createGain(); sfxBus.gain.value = mix.sfx / 100; sfxBus.connect(bass); voices.clear(); document.querySelectorAll('.pad.active').forEach(p => p.classList.remove('active')); }
+
+// ---------- edit actions ----------
+function renameInput(value, label, onSave) {
+  const inp = document.createElement('input'); inp.className = 'rename'; inp.value = value; inp.setAttribute('aria-label', label); inp.maxLength = 60;
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); e.stopPropagation(); });
+  inp.addEventListener('change', async () => { const v = inp.value.trim(); if (!v) { inp.value = value; return; } if (v === value) return;
+    try { await onSave(v); value = v; toast('名前を保存しました'); } catch (e) { inp.value = value; toast(errMsg(e)); } });
+  return inp;
+}
+function armDelete(btn, label, fn) {
+  btn.onclick = e => { e.stopPropagation();
+    if (!btn.classList.contains('arm')) { btn.classList.add('arm'); const t = btn.textContent; btn.textContent = label; setTimeout(() => { btn.classList.remove('arm'); btn.textContent = t; }, 2500); return; }
+    fn(); };
+}
+async function delTrack(c, t) {
+  if (cur && cur.id === t.id) stopTrack(.3);
+  try { await B.delMeta('tracks', t.id); } catch (e) { toast(errMsg(e)); return; }
+  B.delAudio(t.ref); c.tracks.splice(c.tracks.indexOf(t), 1); render();
+}
+async function delCall(c) {
+  if (cur && cur.cid === c.id) stopTrack(.3);
+  try { for (const t of c.tracks) { await B.delMeta('tracks', t.id); B.delAudio(t.ref); } await B.delMeta('calls', c.id); } catch (e) { toast(errMsg(e)); return; }
+  calls.splice(calls.indexOf(c), 1); render(); toast(`「${c.name}」を削除しました`);
+}
+async function delSfx(it) {
+  try { await B.delMeta('sfx', it.id); } catch (e) { toast(errMsg(e)); return; }
+  B.delAudio(it.ref); sfx.splice(sfx.indexOf(it), 1); render();
+}
+
+// ---------- render ----------
+let renderQueued = false;
+function render() { if (renderQueued) return; renderQueued = true; requestAnimationFrame(() => { renderQueued = false; draw(); }); }
+function draw() {
+  if (document.activeElement && document.activeElement.classList.contains('rename')) return; // don't interrupt typing
+  const ed = editing && canEdit();
+  const callsEl = $('calls'); callsEl.innerHTML = '';
+  if (false) callsEl.innerHTML = '<div class="empty">保存した音源を読み込んでいます…</div>';
+  else if (!calls.length) callsEl.innerHTML = canEdit() ? '<div class="empty">まだコールがありません。<br>「＋ コールを追加」で、1つのコールのTRACKファイルをまとめて選んでください。</div>' : '<div class="empty">まだコールが登録されていません。</div>';
+  calls.forEach(c => {
+    const card = document.createElement('div'); card.className = 'call' + (cur && cur.cid === c.id ? ' live' : '') + (ed ? ' editing' : '');
+    const head = document.createElement('div'); head.className = 'call-head';
+    if (ed) {
+      const inp = renameInput(c.name, 'コール名', async v => { c.name = v; await B.saveMeta('calls', c); });
+      const add = document.createElement('button'); add.className = 'btn sm'; add.textContent = '＋ TRACK'; add.onclick = () => { addTarget = c; $('addTrackFile').click(); };
+      const del = document.createElement('button'); del.className = 'btn sm danger'; del.textContent = '削除'; armDelete(del, 'もう一度で削除', () => delCall(c));
+      const cc = document.createElement('div'); cc.className = 'ctrls'; cc.append(add, del); head.append(inp, cc);
+    } else {
+      const h = document.createElement('h3'); h.className = 'call-name'; h.textContent = c.name;
+      const m = document.createElement('span'); m.className = 'label'; m.textContent = c.tracks.length + ' TRACK';
+      head.append(h, m);
+    }
+    const trks = document.createElement('div'); trks.className = 'trks';
+    if (!c.tracks.length) trks.innerHTML = '<div class="empty">TRACKがありません。「編集」→「＋ TRACK」で追加できます。</div>';
+    c.tracks.forEach((t, i) => {
+      const on = cur && cur.id === t.id;
+      const el = document.createElement(ed ? 'div' : 'button');
+      el.className = 'trk' + (on ? ' playing' : '') + (!t.buffer && !t.loading ? ' missing' : ''); el.dataset.id = t.id;
+      const dur = t.buffer ? fmt(t.buffer.duration) : t.loading ? '読み込み中' : '読み込めません';
+      el.innerHTML = `<span class="tl">${on ? '♪ ' : ''}TRACK<b>${i + 1}</b></span><span class="slot"></span><span class="dur">${dur}</span><i class="bar"></i>`;
+      const slot = el.querySelector('.slot');
+      if (ed) {
+        slot.replaceWith(renameInput(t.name, `TRACK ${i + 1}の名前`, async v => { t.name = v; await B.saveMeta('tracks', t); }));
+        const x = document.createElement('button'); x.className = 'del'; x.textContent = '✕'; x.setAttribute('aria-label', 'TRACKを削除'); armDelete(x, '削除', () => delTrack(c, t)); el.appendChild(x);
+      } else { slot.className = 'fn'; slot.textContent = t.name; el.onclick = () => playTrack(c, t); }
+      trks.appendChild(el);
+    });
+    card.append(head, trks); callsEl.appendChild(card);
+  });
+
+  const pads = $('pads'); pads.innerHTML = ''; pads.classList.toggle('editing', ed);
+  if (!sfx.length) pads.innerHTML = canEdit() ? '<div class="empty">効果音をまだ取り込んでいません。<br>「＋ 取り込む」で複数まとめて選ぶと、1つずつパッドになります。</div>' : '<div class="empty">まだ効果音が登録されていません。</div>';
+  sfx.forEach((it, i) => {
+    const el = document.createElement(ed ? 'div' : 'button'); el.className = 'pad' + (voices.get(it.id) ? ' active' : ''); el.id = 'pad-' + it.id;
+    const len = it.buffer ? it.buffer.duration.toFixed(1) + 's' : it.loading ? '…' : '×';
+    el.innerHTML = `<span class="meta"><span>${i < 9 ? i + 1 : ''}</span><span>${len}</span></span><span class="slot"></span>`;
+    const slot = el.querySelector('.slot');
+    if (ed) {
+      slot.replaceWith(renameInput(it.name, '効果音の名前', async v => { it.name = v; await B.saveMeta('sfx', it); }));
+      const x = document.createElement('button'); x.className = 'del'; x.textContent = '✕'; x.setAttribute('aria-label', '効果音を削除'); armDelete(x, '削除', () => delSfx(it)); el.appendChild(x);
+    } else {
+      slot.className = 'nm'; slot.textContent = it.name;
+      el.addEventListener('pointerdown', e => { e.preventDefault(); fire(it, el); });
+      el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fire(it, el); } });
+    }
+    pads.appendChild(el);
+  });
+}
+document.querySelectorAll('.editBtn').forEach(btn => btn.onclick = () => {
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  editing = !editing;
+  document.querySelectorAll('.editBtn').forEach(x => { x.textContent = editing ? '完了' : '編集'; x.classList.toggle('on', editing); x.setAttribute('aria-pressed', editing); });
+  setTimeout(draw, 0);
+});
+document.addEventListener('focusout', e => { if (e.target.classList && e.target.classList.contains('rename')) setTimeout(render, 0); });
+
+// ---------- mixer ----------
+const FADERS = [
+  { k: 'call', label: 'コール曲', min: 0, max: 100, def: 80, fmt: v => Math.round(v) },
+  { k: 'sfx', label: '効果音', min: 0, max: 100, def: 80, fmt: v => Math.round(v) },
+  { k: 'bass', label: '低音', min: -12, max: 15, def: 0, fmt: v => (v > 0 ? '+' : '') + v.toFixed(0) + 'dB', center: true },
+  { k: 'master', label: 'マスター', min: 0, max: 100, def: 85, fmt: v => Math.round(v) },
+];
+const mix = ls.get('mix', {}); FADERS.forEach(f => { if (typeof mix[f.k] !== 'number') mix[f.k] = f.def; });
+function apply(k) {
+  const v = mix[k], t = ctx.currentTime;
+  if (k === 'call') callBus.gain.setTargetAtTime(v / 100, t, .02);
+  if (k === 'sfx') sfxBus.gain.setTargetAtTime(v / 100, t, .02);
+  if (k === 'bass') bass.gain.setTargetAtTime(v, t, .02);
+  if (k === 'master') master.gain.setTargetAtTime(Math.pow(v / 100, 1.5), t, .02);
+}
+const mixer = $('mixer');
+FADERS.forEach(f => {
+  const el = document.createElement('div'); el.className = 'fader'; el.dataset.k = f.k; el.tabIndex = 0;
+  el.setAttribute('role', 'slider'); el.setAttribute('aria-label', f.label); el.setAttribute('aria-valuemin', f.min); el.setAttribute('aria-valuemax', f.max);
+  el.innerHTML = `<div class="fv"></div><div class="rail">${f.center ? '<i class="zero"></i>' : ''}<i class="fill"></i><i class="thumb"></i></div><div class="fl">${f.label}</div>`;
+  const rail = el.querySelector('.rail'), fill = el.querySelector('.fill'), thumb = el.querySelector('.thumb'), fv = el.querySelector('.fv');
+  const paint = () => {
+    const v = mix[f.k], p = (v - f.min) / (f.max - f.min) * 100;
+    thumb.style.bottom = `calc(${p}% * (1 - 14/200))`;
+    if (f.center) { const z = (0 - f.min) / (f.max - f.min) * 100; fill.style.bottom = Math.min(p, z) + '%'; fill.style.height = Math.abs(p - z) + '%'; }
+    else fill.style.height = p + '%';
+    fv.textContent = f.fmt(v); el.setAttribute('aria-valuenow', v); el.setAttribute('aria-valuetext', f.fmt(v));
+  };
+  const set = v => { v = Math.max(f.min, Math.min(f.max, v)); if (f.center && Math.abs(v) < .6) v = 0; mix[f.k] = f.center ? Math.round(v) : v; apply(f.k); paint(); };
+  const fromY = y => { const r = rail.getBoundingClientRect(); return f.min + (1 - (y - r.top) / r.height) * (f.max - f.min); };
+  let lastTap = 0, dragging = false;
+  el.addEventListener('pointerdown', e => {
+    unlock(); const now = performance.now();
+    if (now - lastTap < 300) { set(f.def); ls.set('mix', mix); toast(`${f.label}を初期値に戻しました`); lastTap = 0; return; }
+    lastTap = now; dragging = true; el.setPointerCapture(e.pointerId); set(fromY(e.clientY));
+  });
+  el.addEventListener('pointermove', e => { if (dragging) set(fromY(e.clientY)); });
+  const end = () => { if (dragging) { dragging = false; ls.set('mix', mix); } };
+  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+  el.addEventListener('keydown', e => { const st = (f.max - f.min) / 20;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); set(mix[f.k] + st); ls.set('mix', mix); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); set(mix[f.k] - st); ls.set('mix', mix); } });
+  apply(f.k); paint(); mixer.appendChild(el);
+});
+const note = document.createElement('p'); note.className = 'mix-note'; note.textContent = '低音は真ん中が0。上に上げるほど重低音が強くなります。'; mixer.appendChild(note);
+
+// ---------- strip ----------
+$('sfxStop').onclick = () => { stopSfx(); toast('効果音を止めました'); };
+$('stopAll').onclick = () => { stopTrack(.15); stopSfx(); toast('全停止'); };
+let fading = false;
+$('fadeBtn').onclick = () => {
+  if (fading) return; fading = true; const now = ctx.currentTime;
+  master.gain.cancelScheduledValues(now); master.gain.setValueAtTime(master.gain.value, now); master.gain.linearRampToValueAtTime(0, now + 4); toast('4秒でフェードアウト');
+  setTimeout(() => { stopTrack(.05); stopSfx(); master.gain.cancelScheduledValues(ctx.currentTime); setTimeout(() => { apply('master'); fading = false; }, 200); }, 4100);
+};
+document.addEventListener('keydown', e => {
+  if (e.target.closest && (e.target.closest('.fader') || e.target.tagName === 'INPUT')) return;
+  const n = +e.key; if (n >= 1 && n <= 9 && sfx[n - 1] && !editing) { const it = sfx[n - 1]; const p = $('pad-' + it.id); if (p) fire(it, p); }
+});
+
+let tt; function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
+
+// ---------- meter, progress, bubbles ----------
+const cv = $('fizz'), cx = cv.getContext('2d'); let W, H; const bubbles = [];
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const size = () => { const r = devicePixelRatio || 1; W = innerWidth; H = innerHeight; cv.width = W * r; cv.height = H * r; cx.setTransform(r, 0, 0, r, 0, 0); }; size(); addEventListener('resize', size);
+function burst(el) { if (reduce) return; const r = el.getBoundingClientRect(); for (let i = 0; i < 24; i++) bubbles.push({ x: r.left + Math.random() * r.width, y: r.top + r.height * (.4 + Math.random() * .6), r: 1.5 + Math.random() * 4, vy: 1 + Math.random() * 3, w: Math.random() * 6, a: 1 }); }
+const data = new Uint8Array(analyser.fftSize);
+(function frame() {
+  analyser.getByteTimeDomainData(data); let pk = 0; for (const v of data) pk = Math.max(pk, Math.abs(v - 128)); $('lvl').style.width = Math.min(100, pk / 1.1) + '%';
+  if (cur) { const b = document.querySelector(`.trk[data-id="${cur.id}"] .bar`); if (b) { const el = ctx.currentTime - cur.start; b.style.width = ((endMode === 'loop' ? el % cur.dur : Math.min(el, cur.dur)) / cur.dur * 100) + '%'; } }
+  if (!reduce && cur && Math.random() < .2) bubbles.push({ x: Math.random() * W, y: H + 5, r: 1 + Math.random() * 2.5, vy: .6 + Math.random() * 1.2, w: Math.random() * 6, a: .5 });
+  cx.clearRect(0, 0, W, H);
+  for (let i = bubbles.length - 1; i >= 0; i--) { const b = bubbles[i]; b.y -= b.vy; b.w += .05; b.x += Math.sin(b.w) * .4; b.a -= .006;
+    if (b.a <= 0 || b.y < -10) { bubbles.splice(i, 1); continue; }
+    cx.beginPath(); cx.arc(b.x, b.y, b.r, 0, 6.283); cx.strokeStyle = `rgba(232,195,122,${b.a})`; cx.lineWidth = 1; cx.stroke(); }
+  requestAnimationFrame(frame);
+})();
+
+const wake = () => { try { navigator.wakeLock && navigator.wakeLock.request('screen').catch(() => {}); } catch (e) {} };
+document.addEventListener('pointerdown', wake, { once: true });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wake(); });
+render();
+})();
+</script>
+
+</body>
+</html>
