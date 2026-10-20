@@ -248,17 +248,26 @@ const LDB = openIDB('champagne-dj-v2', 1, ['calls', 'tracks', 'sfx', 'blobs', 'c
 let saveMode = 'local';
 const KINDS = ['calls', 'tracks', 'sfx'];
 const pick = (kind, o) => kind === 'calls' ? { name: o.name, order: o.order }
-  : kind === 'tracks' ? { callId: o.callId, name: o.name, order: o.order, ref: o.ref } : { name: o.name, order: o.order, ref: o.ref };
+  : kind === 'tracks' ? { callId: o.callId, name: o.name, order: o.order, ref: o.ref, dur: o.dur || 0 } : { name: o.name, order: o.order, ref: o.ref };
 const tx = (store, mode, fn) => LDB.then(d => new Promise((res, rej) => { const t = d.transaction(store, mode); const r = fn(t.objectStore(store)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); }));
+const asBlob = d => d instanceof Blob ? d : d ? new Blob([d]) : null;
 const B = {
   async loadMeta() { const out = {}; for (const k of KINDS) out[k] = (await idb(LDB, k, 'readonly', s => s.getAll())) || []; return out; },
   saveMeta: (kind, o) => tx(kind, 'readwrite', s => s.put({ id: o.id, ...pick(kind, o) })),
   delMeta: (kind, id) => tx(kind, 'readwrite', s => s.delete(id)),
-  async putAudio(ab) { const id = uid(); await tx('blobs', 'readwrite', s => s.put({ id, data: ab })); return 'l:' + id; },
-  async getAudio(ref) { if (!ref) return null; const r = await idb(LDB, 'blobs', 'readonly', s => s.get(ref.slice(2))); return r && r.data; },
+  // audio is kept as a Blob: the device stores it on disk instead of holding it in memory
+  async putAudio(data) { const id = uid(); await tx('blobs', 'readwrite', s => s.put({ id, data: asBlob(data) })); return 'l:' + id; },
+  async getAudio(ref) { if (!ref) return null; const r = await idb(LDB, 'blobs', 'readonly', s => s.get(ref.slice(2))); return r ? asBlob(r.data) : null; },
   delAudio: ref => ref ? idb(LDB, 'blobs', 'readwrite', s => s.delete(ref.slice(2))) : null,
 };
 const errMsg = e => e && e.name === 'QuotaExceededError' ? '端末の空き容量が足りません。不要な音源を削除してください' : '保存できませんでした。もう一度試してください';
+// read only the length of a file, without loading the whole song into memory
+const probe = blob => new Promise(res => {
+  const url = URL.createObjectURL(blob); const a = new Audio(); let done = false;
+  const fin = v => { if (done) return; done = true; a.removeAttribute('src'); a.load(); URL.revokeObjectURL(url); res(v); };
+  a.preload = 'metadata'; a.onloadedmetadata = () => fin(isFinite(a.duration) ? a.duration : 0); a.onerror = () => fin(null);
+  setTimeout(() => fin(null), 20000); a.src = url;
+});
 
 // ---------- state ----------
 let calls = [], sfx = [], editing = false;
@@ -266,9 +275,9 @@ const canEdit = () => true;
 
 async function addTrack(call, file, order) {
   try {
-    const ab = await file.arrayBuffer(); const buffer = await decode(ab, file.name); if (!buffer) return false;
-    const ref = await B.putAudio(ab);
-    const t = { id: uid(), callId: call.id, name: base(file.name), order, ref, buffer };
+    const dur = await probe(file); if (dur == null) { toast(`「${file.name}」は再生できない形式です`); return false; }
+    const ref = await B.putAudio(file);
+    const t = { id: uid(), callId: call.id, name: base(file.name), order, ref, dur, url: URL.createObjectURL(file) };
     await B.saveMeta('tracks', t);
     call.tracks.push(t); call.tracks.sort((a, b) => a.order - b.order); return true;
   } catch (e) { toast(errMsg(e)); return false; }
@@ -286,7 +295,7 @@ async function importCall(files, name) {
   calls.push(c); render();
   let i = 0; for (const f of files) { toast(`保存中: ${f.name}`); if (await addTrack(c, f, i)) i++; render(); }
   if (!c.tracks.length) { calls.splice(calls.indexOf(c), 1); B.delMeta('calls', c.id).catch(() => {}); render(); return 0; }
-  return 1;
+  paintChip(); return 1;
 }
 $('callFile').onchange = async e => { const fs = [...e.target.files]; e.target.value = ''; if (await importCall(fs)) toast(`コールを追加しました（${fs.filter(isAudio).length} TRACK）`); };
 $('callDir').onchange = async e => {
@@ -300,36 +309,45 @@ $('addTrackFile').onchange = async e => {
   const fs = [...e.target.files].filter(isAudio).sort((a, b) => natural(a.name, b.name)); e.target.value = ''; const c = addTarget; if (!c) return;
   let o = c.tracks.reduce((m, t) => Math.max(m, t.order), -1) + 1; let n = 0;
   for (const f of fs) { toast(`保存中: ${f.name}`); if (await addTrack(c, f, o)) { o++; n++; } render(); }
-  if (n) toast(`「${c.name}」にTRACKを追加しました`);
+  if (n) { toast(`「${c.name}」にTRACKを追加しました`); paintChip(); }
 };
 $('sfxFile').onchange = async e => {
   const fs = [...e.target.files].filter(isAudio); e.target.value = ''; let n = 0;
   for (const f of fs) {
     toast(`保存中: ${f.name}`);
-    try { const ab = await f.arrayBuffer(); const buffer = await decode(ab, f.name); if (!buffer) continue;
-      const it = { id: uid(), name: base(f.name), order: Date.now() + n, ref: await B.putAudio(ab), buffer };
+    try { const buffer = await decode(await f.arrayBuffer(), f.name); if (!buffer) continue;
+      const it = { id: uid(), name: base(f.name), order: Date.now() + n, ref: await B.putAudio(f), buffer };
       await B.saveMeta('sfx', it); sfx.push(it); n++; render();
     } catch (err) { toast(errMsg(err)); }
   }
-  if (n) toast(`${n}件の効果音を取り込みました`);
+  if (n) { toast(`${n}件の効果音を取り込みました`); paintChip(); }
 };
 
 // ---------- load ----------
 async function loadAll() {
+  calls.forEach(c => c.tracks.forEach(t => t.url && URL.revokeObjectURL(t.url)));
   const m = await B.loadMeta();
   calls = m.calls.sort((a, b) => (a.order || 0) - (b.order || 0)).map(c => ({ ...c, tracks: [] }));
-  m.tracks.filter(t => calls.some(c => c.id === t.callId)).forEach(t => calls.find(c => c.id === t.callId).tracks.push({ ...t, buffer: null, loading: true }));
+  m.tracks.filter(t => calls.some(c => c.id === t.callId)).forEach(t => calls.find(c => c.id === t.callId).tracks.push({ ...t, url: null, loading: true }));
   calls.forEach(c => c.tracks.sort((a, b) => (a.order || 0) - (b.order || 0) || natural(a.name, b.name)));
   sfx = m.sfx.sort((a, b) => (a.order || 0) - (b.order || 0)).map(x => ({ ...x, buffer: null, loading: true }));
   render();
-  const all = [...calls.flatMap(c => c.tracks), ...sfx]; let i = 0;
-  const worker = async () => { while (i < all.length) { const it = all[i++]; const ab = await B.getAudio(it.ref); it.buffer = ab ? await decode(ab, it.name) : null; it.loading = false; render(); } };
-  await Promise.all([worker(), worker(), worker()]);
+  // call tracks: just point at the stored file (fast, light on memory)
+  for (const t of calls.flatMap(c => c.tracks)) {
+    const blob = await B.getAudio(t.ref);
+    if (blob) { t.url = URL.createObjectURL(blob); if (!t.dur) { t.dur = (await probe(blob)) || 0; if (t.dur) B.saveMeta('tracks', t).catch(() => {}); } }
+    t.loading = false;
+  }
+  render();
+  // sound effects: decoded into memory so they fire instantly
+  let i = 0;
+  const worker = async () => { while (i < sfx.length) { const it = sfx[i++]; const blob = await B.getAudio(it.ref); it.buffer = blob ? await decode(await blob.arrayBuffer(), it.name) : null; it.loading = false; render(); } };
+  await Promise.all([worker(), worker()]);
 }
 async function paintChip() {
   const chip = $('saveChip'); chip.className = 'chip cloud';
   let t = 'この端末に保存';
-  try { const e = await navigator.storage.estimate(); if (e && e.usage) t += `（${Math.round(e.usage / 1048576)}MB）`; } catch (e) {}
+  try { const e = await navigator.storage.estimate(); if (e && e.usage) t += `（${Math.round(e.usage / 1048576)}MB / 空き約${Math.max(0, Math.round((e.quota - e.usage) / 1073741824 * 10) / 10)}GB）`; } catch (e) {}
   chip.textContent = t;
 }
 (async () => {
@@ -341,7 +359,7 @@ async function paintChip() {
 // ---------- backup (move sounds to another device) ----------
 $('exportBtn').onclick = async () => {
   const m = await B.loadMeta(); const parts = []; let off = 0;
-  const pack = async list => { const out = []; for (const r of list) { const ab = await B.getAudio(r.ref); if (!ab) continue; out.push({ ...r, ref: undefined, off, len: ab.byteLength }); parts.push(ab); off += ab.byteLength; } return out; };
+  const pack = async list => { const out = []; for (const r of list) { const b = await B.getAudio(r.ref); if (!b) continue; out.push({ ...r, ref: undefined, off, len: b.size }); parts.push(b); off += b.size; } return out; };
   if (!m.calls.length && !m.sfx.length) { toast('書き出す音源がありません'); return; }
   toast('バックアップを作成中');
   const head = { v: 1, app: 'champagne-call-dj', at: new Date().toISOString(), calls: m.calls, tracks: await pack(m.tracks), sfx: await pack(m.sfx) };
@@ -349,20 +367,20 @@ $('exportBtn').onclick = async () => {
   const blob = new Blob([new TextEncoder().encode('CCDJ'), len, json, ...parts], { type: 'application/octet-stream' });
   const d = new Date(); const name = `champagne-dj-backup-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.ccdj`;
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 60000);
   toast(`書き出しました（${Math.round(blob.size / 1048576)}MB）`);
 };
 $('importFile').onchange = async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
   try {
-    const buf = await f.arrayBuffer(); const u8 = new Uint8Array(buf);
-    if (new TextDecoder().decode(u8.slice(0, 4)) !== 'CCDJ') throw 0;
-    const jl = new DataView(buf).getUint32(4); const head = JSON.parse(new TextDecoder().decode(u8.slice(8, 8 + jl))); const bodyAt = 8 + jl;
+    const hb = await f.slice(0, 8).arrayBuffer();
+    if (new TextDecoder().decode(new Uint8Array(hb, 0, 4)) !== 'CCDJ') throw 0;
+    const jl = new DataView(hb).getUint32(4); const head = JSON.parse(await f.slice(8, 8 + jl).text()); const at = 8 + jl;
     const cur0 = await B.loadMeta(); const has = (k, id) => cur0[k].some(x => x.id === id);
     let nc = 0, nt = 0, ns = 0; toast('バックアップを読み込み中');
     for (const c of head.calls) if (!has('calls', c.id)) { await B.saveMeta('calls', c); nc++; }
-    for (const t of head.tracks) if (!has('tracks', t.id)) { const ref = await B.putAudio(buf.slice(bodyAt + t.off, bodyAt + t.off + t.len)); await B.saveMeta('tracks', { ...t, ref }); nt++; }
-    for (const x of head.sfx) if (!has('sfx', x.id)) { const ref = await B.putAudio(buf.slice(bodyAt + x.off, bodyAt + x.off + x.len)); await B.saveMeta('sfx', { ...x, ref }); ns++; }
+    for (const t of head.tracks) if (!has('tracks', t.id)) { const ref = await B.putAudio(f.slice(at + t.off, at + t.off + t.len)); await B.saveMeta('tracks', { ...t, ref }); nt++; }
+    for (const x of head.sfx) if (!has('sfx', x.id)) { const ref = await B.putAudio(f.slice(at + x.off, at + x.off + x.len)); await B.saveMeta('sfx', { ...x, ref }); ns++; }
     await loadAll(); paintChip();
     toast(nt + ns ? `コール${nc}件・TRACK${nt}件・効果音${ns}件を追加しました` : 'すべて取り込み済みでした');
   } catch (err) { toast(err && err.name === 'QuotaExceededError' ? '端末の空き容量が足りません' : 'このファイルはバックアップとして読み込めません'); }
@@ -378,33 +396,37 @@ if (!standalone && /iPhone|iPad|iPod/.test(navigator.userAgent)) $('iosHint').hi
 if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
 
 // ---------- playback ----------
+// call tracks stream from the stored file through an <audio> element, so long or large songs work
 let cur = null;
 const MODES = { loop: 'リピート', next: '次のTRACKへ', stop: '止める' };
 let endMode = ls.get('endMode', 'loop'); if (!MODES[endMode]) endMode = 'loop';
 const modeBtn = $('modeBtn');
 const paintMode = () => { modeBtn.textContent = '曲の終わり：' + MODES[endMode]; };
-modeBtn.onclick = () => { const k = Object.keys(MODES); endMode = k[(k.indexOf(endMode) + 1) % k.length]; ls.set('endMode', endMode); paintMode(); if (cur) cur.src.loop = endMode === 'loop'; toast('曲の終わり：' + MODES[endMode]); };
+modeBtn.onclick = () => { const k = Object.keys(MODES); endMode = k[(k.indexOf(endMode) + 1) % k.length]; ls.set('endMode', endMode); paintMode(); if (cur) cur.a.loop = endMode === 'loop'; toast('曲の終わり：' + MODES[endMode]); };
 paintMode();
 function playTrack(c, t, fadeIn = .8) {
-  unlock(); if (!t.buffer) return;
+  unlock(); if (!t.url) return;
   if (cur && cur.id === t.id) { stopTrack(1.5); return; }
   stopTrack(1.2);
-  const now = ctx.currentTime;
-  const src = ctx.createBufferSource(); src.buffer = t.buffer; src.loop = endMode === 'loop';
-  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(1, now + fadeIn);
-  src.connect(g); g.connect(callBus); src.start(now);
-  cur = { id: t.id, cid: c.id, src, g, start: now, dur: t.buffer.duration };
-  src.onended = () => {
-    if (!cur || cur.src !== src) return;
-    if (endMode === 'next') { const nx = c.tracks[c.tracks.indexOf(t) + 1]; if (nx && nx.buffer) { cur = null; playTrack(c, nx, .03); return; } }
-    cur = null; render();
+  const a = new Audio(); a.preload = 'auto'; a.src = t.url; a.loop = endMode === 'loop';
+  const node = ctx.createMediaElementSource(a);
+  const g = ctx.createGain(); const now = ctx.currentTime; g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(1, now + fadeIn);
+  node.connect(g); g.connect(callBus);
+  const me = { id: t.id, cid: c.id, a, g, node, dur: t.dur || 0 }; cur = me;
+  a.play().catch(() => { if (cur === me) { cur = null; render(); } toast('再生できませんでした'); });
+  a.onended = () => {
+    if (cur !== me) return;
+    if (endMode === 'next') { const idx = c.tracks.findIndex(x => x.id === me.id); const nx = c.tracks[idx + 1];
+      if (nx && nx.url) { me.id = nx.id; me.dur = nx.dur || 0; a.src = nx.url; a.loop = false; a.play().catch(() => {}); render(); return; } }
+    cur = null; teardown(me, 0); render();
   };
   render();
 }
+function teardown(p, delay) { setTimeout(() => { try { p.a.pause(); p.a.removeAttribute('src'); p.a.load(); p.node.disconnect(); p.g.disconnect(); } catch (e) {} }, delay); }
 function stopTrack(fade = .4) {
-  if (!cur) return; const { src, g } = cur; const now = ctx.currentTime;
-  g.gain.cancelScheduledValues(now); g.gain.setValueAtTime(Math.max(g.gain.value, .0001), now); g.gain.exponentialRampToValueAtTime(.0001, now + fade);
-  try { src.stop(now + fade + .05); } catch (e) {} cur = null; render();
+  if (!cur) return; const p = cur; const now = ctx.currentTime;
+  p.g.gain.cancelScheduledValues(now); p.g.gain.setValueAtTime(Math.max(p.g.gain.value, .0001), now); p.g.gain.exponentialRampToValueAtTime(.0001, now + fade);
+  teardown(p, fade * 1000 + 80); cur = null; render();
 }
 const voices = new Map();
 function fire(it, el) {
@@ -471,8 +493,8 @@ function draw() {
     c.tracks.forEach((t, i) => {
       const on = cur && cur.id === t.id;
       const el = document.createElement(ed ? 'div' : 'button');
-      el.className = 'trk' + (on ? ' playing' : '') + (!t.buffer && !t.loading ? ' missing' : ''); el.dataset.id = t.id;
-      const dur = t.buffer ? fmt(t.buffer.duration) : t.loading ? '読み込み中' : '読み込めません';
+      el.className = 'trk' + (on ? ' playing' : '') + (!t.url && !t.loading ? ' missing' : ''); el.dataset.id = t.id;
+      const dur = t.url ? (t.dur ? fmt(t.dur) : '--:--') : t.loading ? '読み込み中' : '読み込めません';
       el.innerHTML = `<span class="tl">${on ? '♪ ' : ''}TRACK<b>${i + 1}</b></span><span class="slot"></span><span class="dur">${dur}</span><i class="bar"></i>`;
       const slot = el.querySelector('.slot');
       if (ed) {
@@ -580,7 +602,7 @@ function burst(el) { if (reduce) return; const r = el.getBoundingClientRect(); f
 const data = new Uint8Array(analyser.fftSize);
 (function frame() {
   analyser.getByteTimeDomainData(data); let pk = 0; for (const v of data) pk = Math.max(pk, Math.abs(v - 128)); $('lvl').style.width = Math.min(100, pk / 1.1) + '%';
-  if (cur) { const b = document.querySelector(`.trk[data-id="${cur.id}"] .bar`); if (b) { const el = ctx.currentTime - cur.start; b.style.width = ((endMode === 'loop' ? el % cur.dur : Math.min(el, cur.dur)) / cur.dur * 100) + '%'; } }
+  if (cur) { const b = document.querySelector(`.trk[data-id="${cur.id}"] .bar`); if (b) { const d = cur.dur || cur.a.duration; b.style.width = (d && isFinite(d) ? Math.min(1, cur.a.currentTime / d) * 100 : 0) + '%'; } }
   if (!reduce && cur && Math.random() < .2) bubbles.push({ x: Math.random() * W, y: H + 5, r: 1 + Math.random() * 2.5, vy: .6 + Math.random() * 1.2, w: Math.random() * 6, a: .5 });
   cx.clearRect(0, 0, W, H);
   for (let i = bubbles.length - 1; i >= 0; i--) { const b = bubbles[i]; b.y -= b.vy; b.w += .05; b.x += Math.sin(b.w) * .4; b.a -= .006;
