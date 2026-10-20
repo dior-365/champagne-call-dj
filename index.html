@@ -166,7 +166,6 @@ button.pad:active{transform:scale(.96)}
     <div class="sec-head">
       <h2 id="h-call">コール</h2>
       <div class="ctrls">
-        <button class="btn" id="modeBtn"></button>
         <button class="btn editBtn canEdit" aria-pressed="false">編集</button>
       </div>
     </div>
@@ -222,7 +221,7 @@ button.pad:active{transform:scale(.96)}
 
 <div class="strip">
   <div class="in">
-    <button class="btn" id="sfxStop">効果音を止める</button>
+    <button class="btn" id="modeBtn"></button>
     <button class="btn" id="fadeBtn">フェードアウト</button>
     <button class="btn live" id="stopAll">全停止</button>
   </div>
@@ -747,7 +746,6 @@ FADERS.forEach(f => {
 const note = document.createElement('p'); note.className = 'mix-note'; note.textContent = '低音は真ん中が0。上に上げるほど重低音が強くなります。'; mixer.appendChild(note);
 
 // ---------- strip ----------
-$('sfxStop').onclick = () => { stopSfx(); toast('効果音を止めました'); };
 $('stopAll').onclick = () => { stopTrack(.15); stopSfx(); toast('全停止'); };
 let fading = false;
 $('fadeBtn').onclick = () => {
