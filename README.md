@@ -1,4 +1,4 @@
-# CHAMPAGNE CALL DJ
+# CALL DJ
 
 シャンパンコール用のDJアプリです。ブラウザで開いて、そのままアプリとしてインストールできます（Windows / Android / iPhone）。
 
