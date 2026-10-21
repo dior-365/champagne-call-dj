@@ -21,7 +21,7 @@ html{background:#150a12}
 body{margin:0}
 [hidden]{display:none!important}
 img{max-width:100%}
-/* Layout: one column — call cards (each holding TRACK 1..n), a 4-fader touch mixer, then the SFX pad grid; a stop strip is fixed to the bottom */
+/* Layout: call cards and the SFX pad grid scroll; the mixer and transport sit in a dock that is always on screen (bottom on phones, right panel on PC) */
 :root{
   --bg:#150a12;
   --surface:#22121d;
@@ -42,7 +42,7 @@ img{max-width:100%}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:15px;line-height:1.55;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
-  padding-block:0 calc(96px + env(safe-area-inset-bottom,0px));-webkit-tap-highlight-color:transparent;overflow-x:hidden}
+  padding-block:0 calc(var(--dock-h,260px) + 16px);-webkit-tap-highlight-color:transparent;overflow-x:hidden}
 #fizz{position:fixed;inset:0;pointer-events:none;z-index:0}
 main{position:relative;z-index:1;max-width:880px;margin:0 auto;display:flex;flex-direction:column;gap:28px;padding-top:20px}
 header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
@@ -121,23 +121,41 @@ button.pad:active{transform:scale(.96)}
 .editing .trk,.editing .pad{border-style:dashed}
 .editing .trk{padding-top:12px}
 /* Mixer */
-.mixer{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px 10px 12px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
-.fader{display:flex;flex-direction:column;align-items:center;gap:8px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:ns-resize;min-width:0;border-radius:10px}
-.fv{font-family:var(--font-mono);font-size:13px;color:var(--gold);font-variant-numeric:tabular-nums;min-height:1.4em}
+.mixer{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.fader{display:flex;flex-direction:column;align-items:center;gap:4px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:ns-resize;min-width:0;border-radius:10px}
+.fv{font-family:var(--font-mono);font-size:12px;color:var(--gold);font-variant-numeric:tabular-nums;min-height:1.4em}
 .fader[data-k=bass] .fv{color:var(--bass)}
-.rail{position:relative;width:56px;max-width:100%;height:200px;border-radius:14px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
+.rail{position:relative;width:56px;max-width:100%;height:var(--rail-h,92px);border-radius:14px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
 .rail .fill{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(0deg,var(--gold-deep),var(--gold));opacity:.85}
 .fader[data-k=bass] .fill{background:linear-gradient(0deg,#5b3fc4,var(--bass))}
 .rail .zero{position:absolute;left:6px;right:6px;top:50%;height:2px;background:var(--line)}
 .rail .thumb{position:absolute;left:4px;right:4px;height:14px;border-radius:7px;background:var(--fg);box-shadow:0 2px 8px rgba(0,0,0,.5);transform:translateY(50%)}
-.fl{font-weight:700;font-size:13px;text-align:center}
-.mix-note{grid-column:1/-1;color:var(--muted);font-size:12px;text-align:center;margin:4px 0 0}
+.fl{font-weight:700;font-size:12px;text-align:center}
+.mix-note{grid-column:1/-1;color:var(--muted);font-size:12px;text-align:center;margin:4px 0 0;display:none}
 .hint{color:var(--muted);font-size:12px;margin:0}
-.strip{position:fixed;left:0;right:0;bottom:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);
-  border-top:1px solid var(--line);padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));
+/* Dock: mixer + transport, always on screen. Phone: bottom sheet. PC: right-hand panel. */
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:5;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(10px);
+  border-top:1px solid var(--line);padding-top:6px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
-.strip .in{max-width:880px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.strip .btn{white-space:normal;line-height:1.2;font-size:13px}
+.dock .in{max-width:880px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
+.dock-head{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:28px}
+.dock-head h2{font-size:14px}
+.mixToggle{min-height:28px;padding:0 10px;border-radius:999px;border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--muted)}
+.dock.min .mixer{display:none}
+.transport{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.transport .btn{white-space:normal;line-height:1.2;font-size:13px}
+@media (min-width:900px){
+  body{padding-right:calc(330px + max(16px,env(safe-area-inset-right,0px)));padding-block:0 32px}
+  .dock{left:auto;top:0;width:330px;border-top:none;border-left:1px solid var(--line);
+    padding-top:calc(20px + env(safe-area-inset-top,0px));padding-left:16px}
+  .dock .in{height:100%;justify-content:space-between;gap:16px}
+  .dock .mixer{display:grid!important;flex:1;align-content:start;padding-top:8px;--rail-h:clamp(180px,calc(100vh - 330px),420px)}
+  .dock-head h2{font-size:18px}
+  .mixToggle{display:none}
+  .mix-note{display:block}
+  .transport{grid-template-columns:1fr}
+  .transport .btn{font-size:14px;min-height:48px}
+}
 .toast{position:fixed;left:50%;top:calc(16px + env(safe-area-inset-top,0px));transform:translateX(-50%);background:var(--gold);color:#2a1508;font-weight:700;
   padding:8px 16px;border-radius:999px;z-index:9;font-size:14px;transition:opacity .3s;opacity:0;pointer-events:none;max-width:90vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toast.show{opacity:1}
@@ -178,11 +196,6 @@ button.pad:active{transform:scale(.96)}
     <p class="hint canEdit">「＋ コールを追加」で曲のファイルを2〜3個まとめて選ぶと、1つのコールになります。「編集」で名前の変更と、◀ ▶ で曲の順番の入れ替えができます。</p>
   </section>
 
-  <section aria-labelledby="h-mix">
-    <div class="sec-head"><h2 id="h-mix">ミキサー</h2><span class="label">上下にスライド・ダブルタップで初期値</span></div>
-    <div class="mixer" id="mixer"></div>
-  </section>
-
   <section aria-labelledby="h-sfx">
     <div class="sec-head">
       <h2 id="h-sfx">効果音</h2>
@@ -208,13 +221,17 @@ button.pad:active{transform:scale(.96)}
 
 </main>
 
-<div class="strip">
+<aside class="dock" id="dock" aria-label="ミキサー">
   <div class="in">
-    <button class="btn" id="modeBtn"></button>
-    <button class="btn" id="fadeBtn">フェードアウト</button>
-    <button class="btn live" id="stopAll">全停止</button>
+    <div class="dock-head"><h2>ミキサー</h2><button class="mixToggle" id="mixToggle" aria-expanded="true">たたむ ▾</button></div>
+    <div class="mixer" id="mixer"></div>
+    <div class="transport">
+      <button class="btn" id="modeBtn"></button>
+      <button class="btn" id="fadeBtn">フェードアウト</button>
+      <button class="btn live" id="stopAll">全停止</button>
+    </div>
   </div>
-</div>
+</aside>
 
 <script>
 (() => {
@@ -675,7 +692,7 @@ FADERS.forEach(f => {
   const rail = el.querySelector('.rail'), fill = el.querySelector('.fill'), thumb = el.querySelector('.thumb'), fv = el.querySelector('.fv');
   const paint = () => {
     const v = mix[f.k], p = (v - f.min) / (f.max - f.min) * 100;
-    thumb.style.bottom = `calc(${p}% * (1 - 14/200))`;
+    thumb.style.bottom = `calc(${p}% - ${p * 0.14}px)`;
     if (f.center) { const z = (0 - f.min) / (f.max - f.min) * 100; fill.style.bottom = Math.min(p, z) + '%'; fill.style.height = Math.abs(p - z) + '%'; }
     else fill.style.height = p + '%';
     fv.textContent = f.fmt(v); el.setAttribute('aria-valuenow', v); el.setAttribute('aria-valuetext', f.fmt(v));
@@ -696,7 +713,14 @@ FADERS.forEach(f => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); set(mix[f.k] - st); ls.set('mix', mix); } });
   apply(f.k); paint(); mixer.appendChild(el);
 });
-const note = document.createElement('p'); note.className = 'mix-note'; note.textContent = '低音は真ん中が0。上に上げるほど重低音が強くなります。'; mixer.appendChild(note);
+const note = document.createElement('p'); note.className = 'mix-note'; note.textContent = '上下にスライド・ダブルタップで初期値。低音は真ん中が0です。'; mixer.appendChild(note);
+// keep the page's bottom padding equal to the dock so nothing hides behind it
+const dock = $('dock'), mixToggle = $('mixToggle');
+const fitDock = () => document.documentElement.style.setProperty('--dock-h', dock.offsetHeight + 'px');
+try { new ResizeObserver(fitDock).observe(dock); } catch (e) { addEventListener('resize', fitDock); } fitDock();
+const paintDock = m => { dock.classList.toggle('min', m); mixToggle.textContent = m ? 'ひらく ▴' : 'たたむ ▾'; mixToggle.setAttribute('aria-expanded', !m); fitDock(); };
+let mixMin = ls.get('mixMin', false); paintDock(mixMin);
+mixToggle.onclick = () => { mixMin = !mixMin; ls.set('mixMin', mixMin); paintDock(mixMin); };
 
 // ---------- strip ----------
 $('stopAll').onclick = () => { stopTrack(.15); stopSfx(); toast('全停止'); };
