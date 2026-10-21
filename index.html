@@ -222,7 +222,6 @@ button.pad:active{transform:scale(.96)}
     </form>
     <div class="ctrls" id="syncCtrls" hidden>
       <button class="btn gold" id="syncBtn">今すぐ同期</button>
-      <button class="btn" type="button" id="syncOff">同期を解除</button>
     </div>
   </section>
 
@@ -570,11 +569,6 @@ $('syncForm').addEventListener('submit', async e => {
 });
 $('syncBtn').onclick = () => syncNow(true);
 $('syncMini').onclick = () => syncNow(true);
-$('syncOff').onclick = async () => {
-  shared = clone(lib); outbox = []; await local.saveLib(shared); await saveOutbox();
-  syncKey = ''; ls.set('syncKey', ''); ls.set('merged', false); etag = null; await connect(); recompute();
-  toast('同期を解除しました。音源はこの端末に残ります');
-};
 (async () => {
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
   try { shared = await local.loadLib(); } catch (e) { shared = emptyLib(); }
