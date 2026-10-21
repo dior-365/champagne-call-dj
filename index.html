@@ -7,11 +7,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="コールDJ">
+<meta name="apple-mobile-web-app-title" content="CALL DJ">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/favicon-64.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<title>シャンパンコールDJ</title>
+<title>CHAMPAGNE CALL DJ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&family=JetBrains+Mono:wght@500&display=swap">
@@ -152,15 +152,14 @@ button.pad:active{transform:scale(.96)}
 <main>
   <header>
     <div>
-      <h1>シャンパン<span>コール</span>DJ</h1>
-      <p class="sub">コールごとに曲を並べて、効果音をタップ。低音は指でスライド。</p>
+      <h1>CHAMPAGNE <span>CALL</span> DJ</h1>
     </div>
     <div class="hright">
-      <span class="chip" id="saveChip">読み込み中</span>
       <button class="btn sm gold" id="installBtn" hidden>アプリとしてインストール</button>
       <div class="meter" aria-label="出力レベル"><i id="lvl"></i></div>
     </div>
   </header>
+  <p class="hint" id="iosHint" hidden>iPhoneでアプリにするには、Safariの共有ボタン →「ホーム画面に追加」を押してください。</p>
 
   <section aria-labelledby="h-call">
     <div class="sec-head">
@@ -198,7 +197,7 @@ button.pad:active{transform:scale(.96)}
   </section>
 
   <section aria-labelledby="h-sync">
-    <div class="sec-head"><h2 id="h-sync">自動同期</h2><span class="label" id="syncState">確認中</span></div>
+    <div class="sec-head"><h2 id="h-sync">自動同期</h2><span class="chip" id="saveChip">確認中</span></div>
     <p class="hint" id="syncNote"></p>
     <form class="ctrls" id="syncForm" hidden autocomplete="off">
       <input class="field" type="password" id="syncKey" placeholder="お店の同期パスワード" aria-label="同期パスワード">
@@ -207,16 +206,6 @@ button.pad:active{transform:scale(.96)}
     </form>
   </section>
 
-  <section aria-labelledby="h-bk">
-    <div class="sec-head"><h2 id="h-bk">バックアップ</h2><span class="label">同期を使わない場合</span></div>
-    <div class="ctrls">
-      <button class="btn" id="exportBtn">書き出す</button>
-      <label class="btn" for="importFile">読み込む</label>
-      <input type="file" id="importFile" accept=".ccdj,application/octet-stream" hidden>
-    </div>
-    <p class="hint">音源はこの端末の中に保存されます。「書き出す」で全部を1つのファイルにまとめ、別の端末で「読み込む」と同じ状態になります。機種変更の前にも書き出しておいてください。</p>
-    <p class="hint" id="iosHint" hidden>iPhoneでアプリにするには、Safariの共有ボタン →「ホーム画面に追加」を押してください。</p>
-  </section>
 </main>
 
 <div class="strip">
@@ -440,7 +429,7 @@ $('sfxFile').onchange = async e => {
 // ---------- start ----------
 async function paintChip() {
   const chip = $('saveChip');
-  const label = { local: 'この端末に保存', sync: 'クラウド同期中', offline: 'オフライン（保存済みの音源で再生）', badkey: '同期パスワードが違います' }[syncMode];
+  const label = { local: serverOk ? '未接続（この端末に保存）' : 'この端末に保存', sync: 'クラウド同期中', offline: 'オフライン（保存済みの音源で再生）', badkey: '同期パスワードが違います' }[syncMode];
   chip.className = 'chip ' + (syncMode === 'sync' ? 'cloud' : syncMode === 'local' ? 'cloud' : 'view');
   let t = label;
   try { const e = await navigator.storage.estimate(); if (e && e.usage && syncMode !== 'badkey') t += `（${Math.round(e.usage / 1048576)}MB）`; } catch (e) {}
@@ -453,10 +442,9 @@ function setSync(m) {
   render();
 }
 function paintSync() {
-  const st = $('syncState'), note = $('syncNote');
+  const note = $('syncNote');
   $('syncForm').hidden = !serverOk; $('syncOff').hidden = !syncKey;
-  if (!serverOk) { st.textContent = '使えません'; note.textContent = 'このアドレスでは自動同期が使えません。Cloudflare版のアドレスから開いてください。'; return; }
-  st.textContent = { local: '未接続', sync: '接続中', offline: 'オフライン', badkey: 'パスワード違い' }[syncMode];
+  if (!serverOk) { note.textContent = 'このアドレスでは自動同期が使えません。Cloudflare版のアドレスから開いてください。'; return; }
   note.textContent = syncMode === 'sync' ? '1台で取り込んだ音源・名前の変更・並べ替えが、同じパスワードで接続した全端末に自動で届きます。'
     : syncMode === 'badkey' ? 'お店の同期パスワードを入れ直してください。'
     : syncMode === 'offline' ? 'ネットにつながると自動で同期を再開します。保存済みの音源はこのまま使えます。'
@@ -500,41 +488,6 @@ $('syncOff').onclick = () => { syncKey = ''; ls.set('syncKey', ''); etag = null;
   addEventListener('online', () => { if (syncKey) connect().then(ok => ok && pull()); });
   addEventListener('offline', () => { if (syncMode === 'sync') setSync('offline'); });
 })();
-
-// ---------- backup (for use without sync) ----------
-$('exportBtn').onclick = async () => {
-  const parts = []; let off = 0;
-  const pack = async list => { const out = []; for (const r of list) { const b = await local.getBlob(r.audio); if (!b) continue; out.push({ ...r, off, len: b.size }); parts.push(b); off += b.size; } return out; };
-  if (!lib.calls.length && !lib.sfx.length) { toast('書き出す音源がありません'); return; }
-  toast('バックアップを作成中');
-  const head = { v: 2, app: 'champagne-call-dj', at: new Date().toISOString(), calls: lib.calls, tracks: await pack(lib.tracks), sfx: await pack(lib.sfx) };
-  const json = new TextEncoder().encode(JSON.stringify(head)); const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, json.length);
-  const blob = new Blob([new TextEncoder().encode('CCDJ'), len, json, ...parts], { type: 'application/octet-stream' });
-  const d = new Date(); const name = `champagne-dj-backup-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.ccdj`;
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 60000);
-  toast(`書き出しました（${Math.round(blob.size / 1048576)}MB）`);
-};
-$('importFile').onchange = async e => {
-  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-  if (!canEdit()) { toast(errMsg({ code: 'offline' })); return; }
-  try {
-    const hb = await f.slice(0, 8).arrayBuffer();
-    if (new TextDecoder().decode(new Uint8Array(hb, 0, 4)) !== 'CCDJ') throw 0;
-    const jl = new DataView(hb).getUint32(4); const head = JSON.parse(await f.slice(8, 8 + jl).text()); const at = 8 + jl;
-    const aud = x => x.audio || (x.ref ? x.ref.slice(2) : uid());
-    const has = (k, id) => lib[k].some(x => x.id === id);
-    const nc = head.calls.filter(c => !has('calls', c.id)).map(c => ({ id: c.id, name: c.name, order: c.order || 0 }));
-    const nt = head.tracks.filter(t => !has('tracks', t.id)).map(t => ({ id: t.id, callId: t.callId, name: t.name, order: t.order || 0, dur: t.dur || 0, audio: aud(t), off: t.off, len: t.len }));
-    const ns = head.sfx.filter(x => !has('sfx', x.id)).map(x => ({ id: x.id, name: x.name, order: x.order || 0, audio: aud(x), off: x.off, len: x.len }));
-    if (!nt.length && !ns.length && !nc.length) { toast('すべて取り込み済みでした'); return; }
-    let i = 0; for (const it of [...nt, ...ns]) { i++; toast(`読み込み中 ${i}/${nt.length + ns.length}`); await storeAudio(it.audio, f.slice(at + it.off, at + it.off + it.len)); delete it.off; delete it.len; }
-    await mutate(l => { l.calls.push(...nc); l.tracks.push(...nt); l.sfx.push(...ns); });
-    [...nt, ...ns].forEach(it => pending.delete(it.audio));
-    fillMedia(false); paintChip();
-    toast(`コール${nc.length}件・曲${nt.length}件・効果音${ns.length}件を追加しました`);
-  } catch (err) { toast(err && (err.name === 'QuotaExceededError' || err.code) ? errMsg(err) : 'このファイルはバックアップとして読み込めません'); }
-};
 
 // ---------- install ----------
 let installEvt = null;
