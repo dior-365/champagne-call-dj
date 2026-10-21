@@ -4,10 +4,12 @@
 
 const LIB = 'library.json';
 const EMPTY_ETAG = '"empty"';
+// Cloudflare can weaken an ETag (W/"…") when it compresses a response, so compare without the W/
+const bare = t => (t || '').trim().replace(/^W\//, '');
 const MAX_AUDIO = 100 * 1024 * 1024;
 
 const json = (data, init = {}) => new Response(JSON.stringify(data), {
-  ...init, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(init.headers || {}) },
+  ...init, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store, no-transform', ...(init.headers || {}) },
 });
 
 function authorized(req, env) {
@@ -33,14 +35,14 @@ export default {
       if (req.method === 'GET') {
         const head = await env.AUDIO.head(LIB);
         const tag = head ? head.httpEtag : EMPTY_ETAG;
-        if (req.headers.get('if-none-match') === tag) return new Response(null, { status: 304, headers: { etag: tag, 'x-lib-etag': tag } });
+        if (bare(req.headers.get('if-none-match')) === tag) return new Response(null, { status: 304, headers: { etag: tag, 'x-lib-etag': tag } });
         if (!head) return json({ calls: [], tracks: [], sfx: [] }, { headers: { etag: tag, 'x-lib-etag': tag } });
         const obj = await env.AUDIO.get(LIB);
         if (!obj) return json({ calls: [], tracks: [], sfx: [] }, { headers: { etag: EMPTY_ETAG, 'x-lib-etag': EMPTY_ETAG } });
-        return new Response(obj.body, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', etag: obj.httpEtag, 'x-lib-etag': obj.httpEtag } });
+        return new Response(obj.body, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store, no-transform', etag: obj.httpEtag, 'x-lib-etag': obj.httpEtag } });
       }
       if (req.method === 'PUT') {
-        const ifMatch = req.headers.get('if-match') || '';
+        const ifMatch = bare(req.headers.get('if-match'));
         const body = await req.text();
         let data; try { data = JSON.parse(body); } catch (e) { return json({ error: 'JSONが不正です' }, { status: 400 }); }
         if (!data || !Array.isArray(data.calls) || !Array.isArray(data.tracks) || !Array.isArray(data.sfx)) return json({ error: '形式が不正です' }, { status: 400 });

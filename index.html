@@ -142,6 +142,10 @@ button.pad:active{transform:scale(.96)}
 .dock-head h2{font-size:14px}
 .mixToggle{min-height:28px;padding:0 10px;border-radius:999px;border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--muted)}
 .dock.min .mixer{display:none}
+.dock-act{display:flex;gap:6px;align-items:center}
+.syncMini{min-height:28px;padding:0 12px;border-radius:999px;border:1px solid color-mix(in srgb,var(--ok) 50%,var(--line));font-size:12px;font-weight:700;color:var(--ok)}
+.syncMini.warn,#syncBtn.warn{background:var(--rose);border-color:var(--rose);color:#fff}
+.syncMini:disabled,#syncBtn:disabled{opacity:.6}
 .transport{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 .transport .btn{white-space:normal;line-height:1.2;font-size:13px}
 @media (min-width:900px){
@@ -210,20 +214,23 @@ button.pad:active{transform:scale(.96)}
   </section>
 
   <section aria-labelledby="h-sync">
-    <div class="sec-head"><h2 id="h-sync">自動同期</h2><span class="chip" id="saveChip">確認中</span></div>
+    <div class="sec-head"><h2 id="h-sync">同期</h2><span class="chip" id="saveChip">確認中</span></div>
     <p class="hint" id="syncNote"></p>
     <form class="ctrls" id="syncForm" hidden autocomplete="off">
       <input class="field" type="password" id="syncKey" placeholder="お店の同期パスワード" aria-label="同期パスワード">
       <button class="btn gold" type="submit">接続</button>
-      <button class="btn" type="button" id="syncOff" hidden>同期を解除</button>
     </form>
+    <div class="ctrls" id="syncCtrls" hidden>
+      <button class="btn gold" id="syncBtn">今すぐ同期</button>
+      <button class="btn" type="button" id="syncOff">同期を解除</button>
+    </div>
   </section>
 
 </main>
 
 <aside class="dock" id="dock" aria-label="ミキサー">
   <div class="in">
-    <div class="dock-head"><h2>ミキサー</h2><button class="mixToggle" id="mixToggle" aria-expanded="true">たたむ ▾</button></div>
+    <div class="dock-head"><h2>ミキサー</h2><div class="dock-act"><button class="syncMini" id="syncMini" hidden>同期</button><button class="mixToggle" id="mixToggle" aria-expanded="true">たたむ ▾</button></div></div>
     <div class="mixer" id="mixer"></div>
     <div class="transport">
       <button class="btn" id="modeBtn"></button>
@@ -287,10 +294,7 @@ const local = {
   delBlob: id => idb(LDB, 'blobs', 'readwrite', s => s.delete(id)),
   blobIds: () => idb(LDB, 'blobs', 'readonly', s => s.getAllKeys()),
 };
-const errMsg = e => e && e.name === 'QuotaExceededError' ? '端末の空き容量が足りません。不要な音源を削除してください'
-  : e && e.code === 'offline' ? '同期サーバーにつながらないため、今は追加・編集できません'
-  : e && e.code === 'toolarge' ? 'ファイルが大きすぎます（1つ100MBまで）。MP3にしてください'
-  : '保存できませんでした。もう一度試してください';
+const errMsg = e => e && e.name === 'QuotaExceededError' ? '端末の空き容量が足りません。不要な音源を削除してください' : '保存できませんでした。もう一度試してください';
 const probe = blob => new Promise(res => {
   const url = URL.createObjectURL(blob); const a = new Audio(); let done = false;
   const fin = v => { if (done) return; done = true; a.removeAttribute('src'); a.load(); URL.revokeObjectURL(url); res(v); };
@@ -299,58 +303,130 @@ const probe = blob => new Promise(res => {
 });
 
 // ---------- sync with Cloudflare ----------
-let lib = emptyLib(), syncMode = 'local', syncKey = ls.get('syncKey', ''), etag = null, serverOk = false;
+// shared   = the shared library as last received from Cloudflare (before connecting: this device's own library)
+// outbox = changes made on this device that are not on Cloudflare yet; the 同期 button sends them
+// lib    = shared + outbox = what the screen shows
+let shared = emptyLib(), outbox = [], lib = emptyLib(), syncMode = 'local', syncKey = ls.get('syncKey', ''), etag = null, serverOk = false, syncing = false;
+const uploaded = new Set(ls.get('uploaded', []));
 const pending = new Set();
 let chain = Promise.resolve(); const serial = fn => (chain = chain.then(fn, fn));
+const clone = o => JSON.parse(JSON.stringify(o));
 const api = (path, opt = {}) => fetch('./api/' + path, { cache: 'no-store', ...opt, headers: { 'X-Store-Key': syncKey, ...(opt.headers || {}) } });
+// Cloudflare may turn an ETag into a weak one (W/"…") when it compresses; compare without the W/
+const tagOf = r => { const t = r.headers.get('x-lib-etag') || r.headers.get('etag'); return t ? t.replace(/^W\//, '') : null; };
 async function ping() { try { const r = await api('ping'); if (!r.ok) return null; const j = await r.json(); return j && j.ok ? j : null; } catch (e) { return null; } }
-async function pullNow() {
-  const r = await api('library', { headers: etag ? { 'If-None-Match': etag, 'X-Store-Key': syncKey } : {} });
-  if (r.status === 304) return false;
-  if (r.status === 401) { setSync('badkey'); return false; }
-  if (!r.ok) throw new Error('pull ' + r.status);
-  const next = await r.json(); etag = r.headers.get('etag') || r.headers.get('x-lib-etag');
-  lib = { ...emptyLib(), ...next }; await local.saveLib(lib); return true;
+
+function applyOp(l, op) {
+  const has = (k, id) => l[k].some(x => x.id === id);
+  if (op.t === 'add') {
+    (op.calls || []).forEach(c => { if (!has('calls', c.id)) l.calls.push(clone(c)); });
+    (op.tracks || []).forEach(t => { if (!has('tracks', t.id) && has('calls', t.callId)) l.tracks.push(clone(t)); });
+    (op.sfx || []).forEach(x => { if (!has('sfx', x.id)) l.sfx.push(clone(x)); });
+  } else if (op.t === 'rename') { const x = l[op.kind].find(y => y.id === op.id); if (x) x.name = op.name; }
+  else if (op.t === 'order') { op.ids.forEach((id, i) => { const x = l[op.kind].find(y => y.id === id); if (x) x.order = i; }); }
+  else if (op.t === 'del') {
+    l[op.kind] = l[op.kind].filter(x => x.id !== op.id);
+    if (op.kind === 'calls') l.tracks = l.tracks.filter(t => t.callId !== op.id);
+  }
+  return l;
 }
-const pull = () => serial(async () => { if (syncMode !== 'sync') return; try { if (await pullNow()) { buildView(); fillMedia(true); } } catch (e) { if (!navigator.onLine) setSync('offline'); } });
-async function mutate(fn) {
+const saveOutbox = () => tx('meta', 'readwrite', s => s.put({ id: 'outbox', ops: outbox }));
+const loadOutbox = async () => { const r = await idb(LDB, 'meta', 'readonly', s => s.get('outbox')); return (r && r.ops) || []; };
+function recompute() { lib = outbox.reduce((l, op) => applyOp(l, op), clone(shared)); buildView(); paintSyncBtn(); }
+// every edit lands on this device first; with sync on it also waits in the outbox for the 同期 button
+function mutate(op) {
   return serial(async () => {
-    if (syncMode === 'offline' || syncMode === 'badkey') throw { code: 'offline' };
-    if (syncMode === 'sync') {
-      for (let i = 0; i < 5; i++) {
-        try { await pullNow(); } catch (e) { throw { code: 'offline' }; }
-        const next = JSON.parse(JSON.stringify(lib)); fn(next);
-        const r = await api('library', { method: 'PUT', headers: { 'If-Match': etag || '"empty"', 'Content-Type': 'application/json', 'X-Store-Key': syncKey }, body: JSON.stringify(next) }).catch(() => null);
-        if (!r) throw { code: 'offline' };
-        if (r.status === 412) { etag = null; continue; }
-        if (!r.ok) throw new Error('save ' + r.status);
-        etag = r.headers.get('etag') || r.headers.get('x-lib-etag'); lib = next; await local.saveLib(lib); buildView(); return;
-      }
-      throw new Error('conflict');
-    }
-    fn(lib); await local.saveLib(lib); buildView();
+    if (syncKey) { outbox.push(op); await saveOutbox(); }
+    else { applyOp(shared, op); await local.saveLib(shared); }
+    recompute();
   });
 }
-async function storeAudio(id, blob) {
-  pending.add(id);
-  await local.putBlob(id, blob);
-  if (syncMode === 'sync') {
-    const r = await api('audio/' + id, { method: 'PUT', body: blob, headers: { 'Content-Type': blob.type || 'application/octet-stream', 'X-Store-Key': syncKey } }).catch(() => null);
-    if (!r) throw { code: 'offline' }; if (r.status === 413) throw { code: 'toolarge' }; if (!r.ok) throw new Error('upload ' + r.status);
-  } else if (syncMode !== 'local') throw { code: 'offline' };
+async function pullNow() {
+  const r = await api('library', { headers: etag ? { 'If-None-Match': etag } : {} }).catch(() => null);
+  if (!r) throw { code: 'net' };
+  if (r.status === 304) return false;
+  if (r.status === 401) throw { code: 'badkey' };
+  if (!r.ok) throw { code: 'server', status: r.status };
+  const next = await r.json(); etag = tagOf(r);
+  const changed = JSON.stringify(next) !== JSON.stringify(shared);
+  shared = { ...emptyLib(), ...next }; await local.saveLib(shared);
+  if (changed) { failed.clear(); recompute(); }
+  return changed;
 }
-function dropAudio(id) {
-  if (!id) return; local.delBlob(id); revoke(id);
-  if (syncMode === 'sync') api('audio/' + id, { method: 'DELETE' }).catch(() => {});
+function dropFromOutbox(audio) {
+  outbox.forEach(op => { if (op.t === 'add') { op.tracks = (op.tracks || []).filter(t => t.audio !== audio); op.sfx = (op.sfx || []).filter(x => x.audio !== audio); } });
+}
+async function pushNow() {
+  if (!outbox.length) return 0;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    let next = outbox.reduce((l, op) => applyOp(l, op), clone(shared));
+    const onServer = new Set([...shared.tracks, ...shared.sfx].map(x => x.audio));
+    const up = [...next.tracks, ...next.sfx].filter(x => x.audio && !onServer.has(x.audio) && !uploaded.has(x.audio));
+    let retry = false;
+    for (let i = 0; i < up.length; i++) {
+      const it = up[i]; const b = await local.getBlob(it.audio);
+      if (!b) { dropFromOutbox(it.audio); retry = true; continue; }
+      toast(`送信中 ${i + 1}/${up.length}：${it.name}`);
+      const r = await api('audio/' + it.audio, { method: 'PUT', body: b, headers: { 'Content-Type': b.type || 'application/octet-stream' } }).catch(() => null);
+      if (!r) throw { code: 'net' };
+      if (r.status === 413) { dropFromOutbox(it.audio); await saveOutbox(); recompute(); toast(`「${it.name}」は大きすぎて送れないため外しました（1つ100MBまで）`); retry = true; continue; }
+      if (r.status === 401) throw { code: 'badkey' };
+      if (!r.ok) throw { code: 'server', status: r.status };
+      uploaded.add(it.audio); ls.set('uploaded', [...uploaded].slice(-500));
+    }
+    if (retry) { await saveOutbox(); continue; }
+    const r = await api('library', { method: 'PUT', headers: { 'If-Match': etag || '"empty"', 'Content-Type': 'application/json' }, body: JSON.stringify(next) }).catch(() => null);
+    if (!r) throw { code: 'net' };
+    if (r.status === 412) { await pullNow(); continue; }
+    if (r.status === 401) throw { code: 'badkey' };
+    if (!r.ok) throw { code: 'server', status: r.status };
+    const sent = outbox.length;
+    const keep = new Set([...next.tracks, ...next.sfx].map(x => x.audio));
+    const gone = [...shared.tracks, ...shared.sfx].map(x => x.audio).filter(a => a && !keep.has(a));
+    etag = tagOf(r); shared = next; outbox = [];
+    await local.saveLib(shared); await saveOutbox(); recompute();
+    gone.forEach(a => api('audio/' + a, { method: 'DELETE' }).catch(() => {}));
+    return sent;
+  }
+  throw { code: 'conflict' };
+}
+const syncErr = e => !e ? '同期できませんでした' : e.code === 'net' ? '同期サーバーにつながりません。ネット接続を確認してください'
+  : e.code === 'badkey' ? '同期パスワードが違います。入れ直してください'
+  : e.code === 'conflict' ? '他の端末と同時に更新されました。もう一度「同期」を押してください'
+  : `同期できませんでした（エラー ${e.status || '不明'}）。もう一度押してください`;
+function syncNow(manual) {
+  return serial(async () => {
+    if (!syncKey) return;
+    syncing = true; paintSyncBtn();
+    try {
+      if (!(await connect())) { if (manual) toast(syncErr({ code: syncMode === 'badkey' ? 'badkey' : 'net' })); return; }
+      await pullNow();
+      const sent = await pushNow();
+      ls.set('lastSync', Date.now()); failed.clear();
+      if (manual) toast(sent ? `同期しました（${sent}件の変更を送信）` : '同期しました（最新の状態です）');
+      fillMedia(true);
+    } catch (e) {
+      if (e && e.code === 'badkey') setSync('badkey'); else if (e && e.code === 'net') setSync('offline');
+      if (manual) toast(syncErr(e));
+    } finally { syncing = false; paintSyncBtn(); paintSync(); }
+  });
+}
+function autoPull() {
+  if (!syncKey || document.visibilityState !== 'visible' || syncing) return;
+  serial(async () => {
+    if (syncMode !== 'sync' && !(await connect())) return;
+    try { if (await pullNow()) fillMedia(true); } catch (e) { if (e && e.code === 'badkey') setSync('badkey'); else setSync('offline'); }
+  });
 }
 async function download(id) {
   const r = await api('audio/' + id).catch(() => null); if (!r || !r.ok) return null;
   const blob = await r.blob(); await local.putBlob(id, blob); return blob;
 }
+function dropAudio(id) { if (!id) return; local.delBlob(id); revoke(id); }
 
 // ---------- view (what the screen shows) ----------
 let calls = [], sfx = [], editing = false;
-const canEdit = () => syncMode === 'local' || syncMode === 'sync';
+const canEdit = () => true;
 const urlCache = new Map(), bufCache = new Map(), failed = new Set();
 const revoke = id => { const u = urlCache.get(id); if (u) URL.revokeObjectURL(u); urlCache.delete(id); bufCache.delete(id); };
 const byOrder = (a, b) => (a.order || 0) - (b.order || 0) || natural(a.name, b.name);
@@ -370,7 +446,7 @@ async function fillMedia(gc) {
       let dl = 0;
       for (const it of need) {
         let blob = await local.getBlob(it.audio);
-        if (!blob && syncMode === 'sync') { dl++; toast(`クラウドから受信中 ${dl}`); blob = await download(it.audio); }
+        if (!blob && syncKey && syncMode !== 'offline') { dl++; toast(`クラウドから受信中 ${dl}`); blob = await download(it.audio); }
         if (!blob) { if (syncMode !== 'offline') failed.add(it.audio); buildView(); continue; }
         if (it.kind === 't') urlCache.set(it.audio, URL.createObjectURL(blob));
         else { const b = await decode(await blob.arrayBuffer(), it.name); if (b) bufCache.set(it.audio, b); else failed.add(it.audio); }
@@ -378,7 +454,7 @@ async function fillMedia(gc) {
       }
       if (dl) { toast('受信が終わりました'); paintChip(); }
     } while (refill);
-    if (gc && syncMode === 'sync') {
+    if (gc && syncKey) {
       const keep = new Set([...lib.tracks, ...lib.sfx].map(x => x.audio));
       for (const id of (await local.blobIds()) || []) if (!keep.has(id) && !pending.has(id)) { local.delBlob(id); revoke(id); }
     }
@@ -398,7 +474,7 @@ async function prepTracks(files, callId, startOrder) {
     toast(`保存中: ${f.name}`);
     const dur = await probe(f); if (dur == null) { toast(`「${f.name}」は再生できない形式です`); continue; }
     const aid = uid();
-    try { await storeAudio(aid, f); } catch (e) { toast(errMsg(e)); pending.delete(aid); local.delBlob(aid); if (e && e.code === 'offline') break; continue; }
+    try { pending.add(aid); await local.putBlob(aid, f); } catch (e) { toast(errMsg(e)); pending.delete(aid); break; }
     urlCache.set(aid, URL.createObjectURL(f));
     out.push({ id: uid(), callId, name: base(f.name), order: o++, dur, audio: aid });
   }
@@ -406,10 +482,9 @@ async function prepTracks(files, callId, startOrder) {
 }
 async function importCall(files, name) {
   files = files.filter(isAudio).sort((a, b) => natural(a.name, b.name)); if (!files.length) return 0;
-  if (!canEdit()) { toast(errMsg({ code: 'offline' })); return 0; }
   const c = { id: uid(), name: name || guessName(files.map(f => f.name)), order: Date.now() };
   const items = await prepTracks(files, c.id, 0); if (!items.length) return 0;
-  try { await mutate(l => { l.calls.push(c); l.tracks.push(...items); }); } catch (e) { toast(errMsg(e)); return 0; } finally { items.forEach(t => pending.delete(t.audio)); }
+  try { await mutate({ t: 'add', calls: [c], tracks: items }); } catch (e) { toast(errMsg(e)); return 0; } finally { items.forEach(t => pending.delete(t.audio)); }
   paintChip(); return items.length;
 }
 $('callFile').onchange = async e => { const fs = [...e.target.files]; e.target.value = ''; const n = await importCall(fs); if (n) toast(`コールを追加しました（${n}曲）`); };
@@ -424,48 +499,50 @@ $('addTrackFile').onchange = async e => {
   const fs = [...e.target.files].filter(isAudio).sort((a, b) => natural(a.name, b.name)); e.target.value = ''; const c = addTarget; if (!c || !fs.length) return;
   const start = lib.tracks.filter(t => t.callId === c.id).reduce((m, t) => Math.max(m, t.order || 0), -1) + 1;
   const items = await prepTracks(fs, c.id, start); if (!items.length) return;
-  try { await mutate(l => { if (l.calls.some(x => x.id === c.id)) l.tracks.push(...items); }); toast(`「${c.name}」に曲を追加しました`); paintChip(); }
+  try { await mutate({ t: 'add', tracks: items }); toast(`「${c.name}」に曲を追加しました`); paintChip(); }
   catch (err) { toast(errMsg(err)); } finally { items.forEach(t => pending.delete(t.audio)); }
 };
 $('sfxFile').onchange = async e => {
   const fs = [...e.target.files].filter(isAudio); e.target.value = ''; if (!fs.length) return;
-  if (!canEdit()) { toast(errMsg({ code: 'offline' })); return; }
   const items = []; let o = Date.now();
   for (const f of fs) {
     toast(`保存中: ${f.name}`);
     const b = await decode(await f.arrayBuffer(), f.name); if (!b) continue;
     const aid = uid();
-    try { await storeAudio(aid, f); } catch (err) { toast(errMsg(err)); pending.delete(aid); local.delBlob(aid); if (err && err.code === 'offline') break; continue; }
+    try { pending.add(aid); await local.putBlob(aid, f); } catch (err) { toast(errMsg(err)); pending.delete(aid); break; }
     bufCache.set(aid, b); items.push({ id: uid(), name: base(f.name), order: o++, audio: aid });
   }
   if (!items.length) return;
-  try { await mutate(l => { l.sfx.push(...items); }); toast(`${items.length}件の効果音を取り込みました`); paintChip(); }
+  try { await mutate({ t: 'add', sfx: items }); toast(`${items.length}件の効果音を取り込みました`); paintChip(); }
   catch (err) { toast(errMsg(err)); } finally { items.forEach(x => pending.delete(x.audio)); }
 };
 
 // ---------- start ----------
 async function paintChip() {
   const chip = $('saveChip');
-  const label = { local: serverOk ? '未接続（この端末に保存）' : 'この端末に保存', sync: 'クラウド同期中', offline: 'オフライン（保存済みの音源で再生）', badkey: '同期パスワードが違います' }[syncMode];
-  chip.className = 'chip ' + (syncMode === 'sync' ? 'cloud' : syncMode === 'local' ? 'cloud' : 'view');
-  let t = label;
-  try { const e = await navigator.storage.estimate(); if (e && e.usage && syncMode !== 'badkey') t += `（${Math.round(e.usage / 1048576)}MB）`; } catch (e) {}
-  chip.textContent = t;
+  const label = !syncKey ? (serverOk ? '未接続（この端末に保存）' : 'この端末に保存')
+    : { local: '未接続', sync: 'クラウド接続中', offline: 'オフライン', badkey: 'パスワード違い' }[syncMode];
+  chip.className = 'chip ' + (syncMode === 'offline' || syncMode === 'badkey' ? 'view' : 'cloud');
+  chip.textContent = label;
 }
-function setSync(m) {
-  syncMode = m; paintChip(); paintSync();
-  document.querySelectorAll('.canEdit').forEach(el => el.hidden = !canEdit());
-  if (!canEdit() && editing) { editing = false; document.querySelectorAll('.editBtn').forEach(x => { x.textContent = '編集'; x.classList.remove('on'); }); }
-  render();
+function setSync(m) { syncMode = m; paintChip(); paintSync(); paintSyncBtn(); }
+const hhmm = t => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+function paintSyncBtn() {
+  const n = outbox.length, mini = $('syncMini'), btn = $('syncBtn');
+  const txt = syncing ? '同期中…' : n ? `同期する（未送信${n}）` : '同期';
+  for (const b of [mini, btn]) { b.textContent = b === btn && !syncing && !n ? '今すぐ同期' : txt; b.classList.toggle('warn', !!n && !syncing); b.disabled = syncing; }
+  mini.hidden = !syncKey;
 }
 function paintSync() {
-  const note = $('syncNote');
-  $('syncForm').hidden = !serverOk; $('syncOff').hidden = !syncKey;
-  if (!serverOk) { note.textContent = 'このアドレスでは自動同期が使えません。Cloudflare版のアドレスから開いてください。'; return; }
-  note.textContent = syncMode === 'sync' ? '1台で取り込んだ音源・名前の変更・並べ替えが、同じパスワードで接続した全端末に自動で届きます。'
-    : syncMode === 'badkey' ? 'お店の同期パスワードを入れ直してください。'
-    : syncMode === 'offline' ? 'ネットにつながると自動で同期を再開します。保存済みの音源はこのまま使えます。'
-    : 'お店の同期パスワードを入れると、全端末で同じ音源を使えるようになります。';
+  const note = $('syncNote'), last = ls.get('lastSync', 0);
+  const needKey = !syncKey || syncMode === 'badkey';
+  $('syncForm').hidden = !serverOk || !needKey; $('syncCtrls').hidden = !syncKey;
+  if (!serverOk && !syncKey) { note.textContent = 'このアドレスでは同期が使えません。Cloudflare版のアドレスから開いてください。'; return; }
+  const lastTxt = last ? `最終同期：${hhmm(last)}。` : '';
+  note.textContent = !syncKey ? 'お店の同期パスワードを入れると、全端末で同じ音源を使えるようになります。'
+    : syncMode === 'badkey' ? 'お店の同期パスワードが違います。入れ直してください。'
+    : syncMode === 'offline' ? `ネットにつながっていません。編集はこの端末に保存され、つながったあと「同期」で送れます。${lastTxt}`
+    : `音源の追加・名前の変更・並べ替え・削除が終わったら「同期」を押すと、全端末に送られます。他の端末の変更は自動で受け取ります。${lastTxt}`;
 }
 async function connect() {
   const j = await ping(); if (j) ls.set('serverSeen', true);
@@ -475,35 +552,45 @@ async function connect() {
   if (!j.auth) { setSync('badkey'); return false; }
   setSync('sync'); return true;
 }
-// first connection: send what this device already has, then take the shared library
+// first connection on this device: queue everything it already has, then sync
 async function mergeUp() {
-  const mine = await local.loadLib(); etag = null;
-  await serial(async () => { await pullNow(); });
-  const has = (k, id) => lib[k].some(x => x.id === id);
-  const addCalls = mine.calls.filter(c => !has('calls', c.id)), addTracks = mine.tracks.filter(t => !has('tracks', t.id)), addSfx = mine.sfx.filter(x => !has('sfx', x.id));
-  const items = [...addTracks, ...addSfx]; let n = 0;
-  for (const it of items) { const b = await local.getBlob(it.audio); if (!b) continue; n++; toast(`クラウドへ送信中 ${n}/${items.length}`); await storeAudio(it.audio, b); }
-  if (addCalls.length || addTracks.length || addSfx.length) await mutate(l => { l.calls.push(...addCalls.filter(c => !l.calls.some(x => x.id === c.id))); l.tracks.push(...addTracks.filter(t => !l.tracks.some(x => x.id === t.id))); l.sfx.push(...addSfx.filter(s => !l.sfx.some(x => x.id === s.id))); });
-  items.forEach(it => pending.delete(it.audio));
-  if (n) toast('この端末の音源をクラウドに送りました');
+  const mine = clone(shared);
+  if (mine.calls.length || mine.sfx.length) outbox.push({ t: 'add', calls: mine.calls, tracks: mine.tracks, sfx: mine.sfx });
+  shared = emptyLib(); etag = null; await local.saveLib(shared); await saveOutbox(); recompute();
+  ls.set('merged', true);
 }
 $('syncForm').addEventListener('submit', async e => {
   e.preventDefault(); const v = $('syncKey').value.trim(); if (!v) return;
+  const first = !syncKey;
   syncKey = v; ls.set('syncKey', v); toast('接続しています');
-  if (await connect()) { try { await mergeUp(); ls.set('merged', true); } catch (err) { toast(errMsg(err)); } buildView(); await fillMedia(true); toast('同期をはじめました'); $('syncKey').value = ''; }
-  else if (syncMode === 'badkey') toast('パスワードが違います');
+  if (await connect()) {
+    if (first && !ls.get('merged', false)) await mergeUp();
+    $('syncKey').value = ''; await syncNow(true);
+  } else toast(syncMode === 'badkey' ? 'パスワードが違います' : '同期サーバーにつながりません');
 });
-$('syncOff').onclick = () => { syncKey = ''; ls.set('syncKey', ''); etag = null; setSync('local'); toast('同期を解除しました。音源はこの端末に残ります'); };
+$('syncBtn').onclick = () => syncNow(true);
+$('syncMini').onclick = () => syncNow(true);
+$('syncOff').onclick = async () => {
+  shared = clone(lib); outbox = []; await local.saveLib(shared); await saveOutbox();
+  syncKey = ''; ls.set('syncKey', ''); ls.set('merged', false); etag = null; await connect(); recompute();
+  toast('同期を解除しました。音源はこの端末に残ります');
+};
 (async () => {
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
-  try { lib = await local.loadLib(); } catch (e) { lib = emptyLib(); }
-  buildView(); fillMedia(false);
-  if (await connect()) { if (!ls.get('merged', false)) { try { await mergeUp(); ls.set('merged', true); } catch (e) {} } await pull(); fillMedia(true); }
-  paintChip();
-  setInterval(() => { if (document.visibilityState === 'visible') { if (syncMode === 'sync') pull(); else if (syncMode === 'offline' && navigator.onLine) connect().then(ok => ok && pull()); } }, 20000);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && syncMode === 'sync') pull(); });
-  addEventListener('online', () => { if (syncKey) connect().then(ok => ok && pull()); });
-  addEventListener('offline', () => { if (syncMode === 'sync') setSync('offline'); });
+  try { shared = await local.loadLib(); } catch (e) { shared = emptyLib(); }
+  try { outbox = await loadOutbox(); } catch (e) { outbox = []; }
+  recompute(); fillMedia(false);
+  if (await connect()) {
+    if (!ls.get('merged', false)) await mergeUp();
+    await serial(async () => { try { await pullNow(); } catch (e) {} });
+    fillMedia(true);
+    if (outbox.length) toast(`未送信の変更が${outbox.length}件あります。「同期」を押してください`);
+  }
+  paintChip(); paintSync(); paintSyncBtn();
+  setInterval(autoPull, 20000);
+  document.addEventListener('visibilitychange', autoPull);
+  addEventListener('online', autoPull);
+  addEventListener('offline', () => { if (syncKey) setSync('offline'); });
 })();
 
 // ---------- install ----------
@@ -570,29 +657,26 @@ function armDelete(btn, label, fn) {
     if (!btn.classList.contains('arm')) { btn.classList.add('arm'); const t = btn.textContent; btn.textContent = label; setTimeout(() => { btn.classList.remove('arm'); btn.textContent = t; }, 2500); return; }
     fn(); };
 }
-const rename = (kind, id, v) => mutate(l => { const x = l[kind].find(y => y.id === id); if (x) x.name = v; });
-// swap an item with its neighbour (within the same call for songs) and renumber the order
+const rename = (kind, id, v) => mutate({ t: 'rename', kind, id, name: v });
+// swap an item with its neighbour (songs stay inside their call) and store the new order
 async function move(kind, id, dir) {
-  try {
-    await mutate(l => {
-      const me = l[kind].find(x => x.id === id); if (!me) return;
-      const list = l[kind].filter(x => kind !== 'tracks' || x.callId === me.callId).sort(byOrder);
-      const i = list.indexOf(me), j = i + dir; if (j < 0 || j >= list.length) return;
-      [list[i], list[j]] = [list[j], list[i]]; list.forEach((x, k) => { x.order = k; });
-    });
-  } catch (e) { toast(errMsg(e)); }
+  const me = lib[kind].find(x => x.id === id); if (!me) return;
+  const list = lib[kind].filter(x => kind !== 'tracks' || x.callId === me.callId).sort(byOrder);
+  const i = list.indexOf(me), j = i + dir; if (j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  try { await mutate({ t: 'order', kind, ids: list.map(x => x.id) }); } catch (e) { toast(errMsg(e)); }
 }
 async function delTrack(t) {
   if (cur && cur.id === t.id) stopTrack(.3);
-  try { await mutate(l => { l.tracks = l.tracks.filter(x => x.id !== t.id); }); dropAudio(t.audio); } catch (e) { toast(errMsg(e)); }
+  try { await mutate({ t: 'del', kind: 'tracks', id: t.id }); dropAudio(t.audio); } catch (e) { toast(errMsg(e)); }
 }
 async function delCall(c) {
   if (cur && cur.cid === c.id) stopTrack(.3);
   const gone = lib.tracks.filter(t => t.callId === c.id).map(t => t.audio);
-  try { await mutate(l => { l.calls = l.calls.filter(x => x.id !== c.id); l.tracks = l.tracks.filter(t => t.callId !== c.id); }); gone.forEach(dropAudio); toast(`「${c.name}」を削除しました`); } catch (e) { toast(errMsg(e)); }
+  try { await mutate({ t: 'del', kind: 'calls', id: c.id }); gone.forEach(dropAudio); toast(`「${c.name}」を削除しました`); } catch (e) { toast(errMsg(e)); }
 }
 async function delSfx(it) {
-  try { await mutate(l => { l.sfx = l.sfx.filter(x => x.id !== it.id); }); dropAudio(it.audio); } catch (e) { toast(errMsg(e)); }
+  try { await mutate({ t: 'del', kind: 'sfx', id: it.id }); dropAudio(it.audio); } catch (e) { toast(errMsg(e)); }
 }
 function mvBtn(txt, label, dis, fn) { const b = document.createElement('button'); b.className = 'mv'; b.textContent = txt; b.setAttribute('aria-label', label); b.disabled = dis; b.onclick = e => { e.stopPropagation(); fn(); }; return b; }
 
