@@ -105,7 +105,7 @@ button.trk:active{transform:scale(.96)}
 .call-head .mv{flex:0 0 38px;min-height:36px}
 .field{flex:1 1 200px;min-width:0;min-height:42px;font:inherit;color:var(--fg);background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:0 12px}
 .editing .trk{min-height:132px}
-.trk .bar{position:absolute;left:0;bottom:0;height:4px;width:0;background:var(--gold)}
+.trk .tw{display:block;width:100%;height:24px}
 /* SFX pads */
 .pads{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 @media (min-width:640px){.pads{grid-template-columns:repeat(4,minmax(0,1fr))}}
@@ -142,6 +142,12 @@ button.pad:active{transform:scale(.96)}
 .dock-head h2{font-size:14px}
 .mixToggle{min-height:28px;padding:0 10px;border-radius:999px;border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--muted)}
 .dock.min .mixer{display:none}
+.np{display:flex;flex-direction:column;gap:4px;min-width:0}
+.np-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px;min-width:0}
+.np-name{font-weight:700;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0;color:var(--gold)}
+.np-time{font-family:var(--font-mono);font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+.np-time.soon{color:var(--rose);font-weight:700}
+.np-wave{display:block;width:100%;height:44px;border-radius:8px;background:var(--surface);touch-action:none;cursor:pointer}
 .dock-act{display:flex;gap:6px;align-items:center}
 .syncMini{min-height:28px;padding:0 12px;border-radius:999px;border:1px solid color-mix(in srgb,var(--ok) 50%,var(--line));font-size:12px;font-weight:700;color:var(--ok)}
 .syncMini.warn,#syncBtn.warn{background:var(--rose);border-color:var(--rose);color:#fff}
@@ -158,6 +164,7 @@ button.pad:active{transform:scale(.96)}
   .mixToggle{display:none}
   .mix-note{display:block}
   .transport{grid-template-columns:1fr}
+  .np-wave{height:72px}
   .transport .btn{font-size:14px;min-height:48px}
 }
 .toast{position:fixed;left:50%;top:calc(16px + env(safe-area-inset-top,0px));transform:translateX(-50%);background:var(--gold);color:#2a1508;font-weight:700;
@@ -230,6 +237,10 @@ button.pad:active{transform:scale(.96)}
 <aside class="dock" id="dock" aria-label="ミキサー">
   <div class="in">
     <div class="dock-head"><h2>ミキサー</h2><div class="dock-act"><button class="syncMini" id="syncMini" hidden>同期</button><button class="mixToggle" id="mixToggle" aria-expanded="true">たたむ ▾</button></div></div>
+    <div class="np" id="np">
+      <div class="np-top"><span class="np-name" id="npName">再生していません</span><span class="np-time" id="npTime"></span></div>
+      <canvas class="np-wave" id="npWave" aria-label="再生中の曲の波形。タップした位置へ移動します"></canvas>
+    </div>
     <div class="mixer" id="mixer"></div>
     <div class="transport">
       <button class="btn" id="modeBtn"></button>
@@ -331,7 +342,7 @@ function applyOp(l, op) {
 }
 const saveOutbox = () => tx('meta', 'readwrite', s => s.put({ id: 'outbox', ops: outbox }));
 const loadOutbox = async () => { const r = await idb(LDB, 'meta', 'readonly', s => s.get('outbox')); return (r && r.ops) || []; };
-function recompute() { lib = outbox.reduce((l, op) => applyOp(l, op), clone(shared)); buildView(); paintSyncBtn(); }
+function recompute() { lib = outbox.reduce((l, op) => applyOp(l, op), clone(shared)); buildView(); paintSyncBtn(); setTimeout(ensurePeaks, 0); }
 // every edit lands on this device first; with sync on it also waits in the outbox for the 同期 button
 function mutate(op) {
   return serial(async () => {
@@ -421,7 +432,7 @@ async function download(id) {
   const r = await api('audio/' + id).catch(() => null); if (!r || !r.ok) return null;
   const blob = await r.blob(); await local.putBlob(id, blob); return blob;
 }
-function dropAudio(id) { if (!id) return; local.delBlob(id); revoke(id); }
+function dropAudio(id) { if (!id) return; local.delBlob(id); revoke(id); idb(LDB, 'meta', 'readwrite', s => s.delete('peaks:' + id)); peaksCache.delete(id); }
 
 // ---------- view (what the screen shows) ----------
 let calls = [], sfx = [], editing = false;
@@ -455,9 +466,10 @@ async function fillMedia(gc) {
     } while (refill);
     if (gc && syncKey) {
       const keep = new Set([...lib.tracks, ...lib.sfx].map(x => x.audio));
-      for (const id of (await local.blobIds()) || []) if (!keep.has(id) && !pending.has(id)) { local.delBlob(id); revoke(id); }
+      for (const id of (await local.blobIds()) || []) if (!keep.has(id) && !pending.has(id)) dropAudio(id);
     }
   } finally { filling = false; }
+  ensurePeaks();
 }
 
 // ---------- adding sounds ----------
@@ -704,7 +716,7 @@ function draw() {
       const el = document.createElement(ed ? 'div' : 'button');
       el.className = 'trk' + (on ? ' playing' : '') + (!t.url && !t.loading ? ' missing' : ''); el.dataset.id = t.id;
       const dur = t.url ? (t.dur ? fmt(t.dur) : '--:--') : t.loading ? '読み込み中' : '読み込めません';
-      el.innerHTML = `<span class="slot"></span><span class="dur">${on ? '♪ 再生中 · ' : ''}${dur}</span><i class="bar"></i>`;
+      el.innerHTML = `<span class="slot"></span><canvas class="tw" data-tid="${t.id}" data-audio="${t.audio || ''}"></canvas><span class="dur">${on ? '♪ 再生中 · ' : ''}${dur}</span>`;
       const slot = el.querySelector('.slot');
       if (ed) {
         slot.replaceWith(renameInput(t.name, '曲の名前', v => rename('tracks', t.id, v)));
@@ -738,6 +750,7 @@ function draw() {
     }
     pads.appendChild(el);
   });
+  paintWaves();
 }
 document.querySelectorAll('.editBtn').forEach(btn => btn.onclick = () => {
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -815,6 +828,90 @@ document.addEventListener('keydown', e => {
 
 let tt; function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
 
+// ---------- waveforms ----------
+// Peaks are worked out once per song (decoded at a low sample rate to keep memory small) and kept on this device.
+const peaksCache = new Map();
+const WCOL = { dim: '#b59aa8', on: '#e8c37a', head: '#f6ece4', base: '#4a2b3d' };
+async function computePeaks(blob, N = 800) {
+  try {
+    const ab = await blob.arrayBuffer();
+    const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    let buf; try { buf = await new OC(1, 1, 8000).decodeAudioData(ab.slice(0)); } catch (e) { buf = await ctx.decodeAudioData(ab); }
+    const len = buf.length, step = len / N, chs = []; for (let c = 0; c < buf.numberOfChannels; c++) chs.push(buf.getChannelData(c));
+    const out = new Array(N).fill(0); let mx = 0;
+    for (let i = 0; i < N; i++) {
+      const a = Math.floor(i * step), b = Math.min(len, Math.max(a + 1, Math.floor((i + 1) * step))); let m = 0;
+      for (const d of chs) for (let k = a; k < b; k++) { const v = d[k] < 0 ? -d[k] : d[k]; if (v > m) m = v; }
+      out[i] = m; if (m > mx) mx = m;
+    }
+    return out.map(v => Math.round(mx ? v / mx * 255 : 0));
+  } catch (e) { return null; }
+}
+let peaking = false, repeak = false;
+async function ensurePeaks() {
+  if (peaking) { repeak = true; return; } peaking = true;
+  try {
+    do {
+      repeak = false;
+      for (const t of lib.tracks.slice()) {
+        if (!t.audio || peaksCache.has(t.audio)) continue;
+        const r = await idb(LDB, 'meta', 'readonly', s => s.get('peaks:' + t.audio));
+        if (r && r.p) { peaksCache.set(t.audio, r.p); paintWaves(); continue; }
+        const blob = await local.getBlob(t.audio); if (!blob) continue;
+        const p = await computePeaks(blob); peaksCache.set(t.audio, p);
+        if (p) { idb(LDB, 'meta', 'readwrite', s => s.put({ id: 'peaks:' + t.audio, p })); paintWaves(); }
+      }
+    } while (repeak);
+  } finally { peaking = false; }
+}
+function drawWave(cvs, peaks, prog, head) {
+  const w = cvs.clientWidth, h = cvs.clientHeight; if (!w || !h) return;
+  const r = devicePixelRatio || 1, W2 = Math.round(w * r), H2 = Math.round(h * r);
+  if (cvs.width !== W2 || cvs.height !== H2) { cvs.width = W2; cvs.height = H2; }
+  const g = cvs.getContext('2d'); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
+  if (!peaks) { g.fillStyle = WCOL.base; g.fillRect(0, h / 2 - .5, w, 1); }
+  else {
+    const bw = w > 200 ? 2 : 1.5, step = bw + 1, n = Math.max(1, Math.floor(w / step));
+    for (let i = 0; i < n; i++) {
+      const a = Math.floor(i * peaks.length / n), b = Math.max(a + 1, Math.floor((i + 1) * peaks.length / n)); let m = 0;
+      for (let k = a; k < b; k++) if (peaks[k] > m) m = peaks[k];
+      const v = Math.max(1, m / 255 * h * .92), x = i * step, played = (x + bw / 2) / w < prog;
+      g.globalAlpha = played ? 1 : .5; g.fillStyle = played ? WCOL.on : WCOL.dim; g.fillRect(x, (h - v) / 2, bw, v);
+    }
+    g.globalAlpha = 1;
+  }
+  if (head && prog > 0) { g.fillStyle = WCOL.head; g.fillRect(Math.min(w - 2, Math.max(0, prog * w - 1)), 0, 2, h); }
+}
+const curProg = () => { if (!cur) return 0; const d = cur.dur || cur.a.duration; return d && isFinite(d) ? Math.min(1, cur.a.currentTime / d) : 0; };
+function paintWaves() {
+  document.querySelectorAll('canvas.tw').forEach(c => drawWave(c, peaksCache.get(c.dataset.audio), cur && cur.id === c.dataset.tid ? curProg() : 0, false));
+  npDirty = true;
+}
+// now playing: name, time left, big waveform you can tap to jump
+let npDirty = true, npId = null;
+function paintNP() {
+  const name = $('npName'), time = $('npTime'), wave = $('npWave');
+  if (!cur) {
+    if (npId !== null || npDirty) { npId = null; npDirty = false; name.textContent = '再生していません'; time.textContent = ''; time.classList.remove('soon'); drawWave(wave, null, 0, false); }
+    return;
+  }
+  const t = lib.tracks.find(x => x.id === cur.id);
+  if (npId !== cur.id) { npId = cur.id; name.textContent = t ? '♪ ' + t.name : '♪'; }
+  const d = cur.dur || cur.a.duration, now = cur.a.currentTime || 0, left = d && isFinite(d) ? Math.max(0, d - now) : 0;
+  time.textContent = `${fmt(now)} / 残り ${fmt(left)}`; time.classList.toggle('soon', !!d && left < 10);
+  drawWave(wave, t ? peaksCache.get(t.audio) : null, curProg(), true);
+  const tile = document.querySelector(`canvas.tw[data-tid="${cur.id}"]`); if (tile) drawWave(tile, peaksCache.get(tile.dataset.audio), curProg(), false);
+  npDirty = false;
+}
+{
+  const wave = $('npWave'); let dragging = false;
+  const seek = e => { if (!cur) return; const d = cur.dur || cur.a.duration; if (!d || !isFinite(d)) return; const r = wave.getBoundingClientRect(); cur.a.currentTime = Math.max(0, Math.min(.999, (e.clientX - r.left) / r.width)) * d; };
+  wave.addEventListener('pointerdown', e => { if (!cur) return; dragging = true; wave.setPointerCapture(e.pointerId); seek(e); });
+  wave.addEventListener('pointermove', e => { if (dragging) seek(e); });
+  const end = () => { dragging = false; }; wave.addEventListener('pointerup', end); wave.addEventListener('pointercancel', end);
+  addEventListener('resize', () => { paintWaves(); });
+}
+
 // ---------- meter, progress, bubbles ----------
 const cv = $('fizz'), cx = cv.getContext('2d'); let W, H; const bubbles = [];
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -823,7 +920,7 @@ function burst(el) { if (reduce) return; const r = el.getBoundingClientRect(); f
 const data = new Uint8Array(analyser.fftSize);
 (function frame() {
   analyser.getByteTimeDomainData(data); let pk = 0; for (const v of data) pk = Math.max(pk, Math.abs(v - 128)); $('lvl').style.width = Math.min(100, pk / 1.1) + '%';
-  if (cur) { const b = document.querySelector(`.trk[data-id="${cur.id}"] .bar`); if (b) { const d = cur.dur || cur.a.duration; b.style.width = (d && isFinite(d) ? Math.min(1, cur.a.currentTime / d) * 100 : 0) + '%'; } }
+  paintNP();
   if (!reduce && cur && Math.random() < .2) bubbles.push({ x: Math.random() * W, y: H + 5, r: 1 + Math.random() * 2.5, vy: .6 + Math.random() * 1.2, w: Math.random() * 6, a: .5 });
   cx.clearRect(0, 0, W, H);
   for (let i = bubbles.length - 1; i >= 0; i--) { const b = bubbles[i]; b.y -= b.vy; b.w += .05; b.x += Math.sin(b.w) * .4; b.a -= .006;
