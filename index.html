@@ -152,21 +152,32 @@ button.pad:active{transform:scale(.96)}
 .syncMini{min-height:28px;padding:0 12px;border-radius:999px;border:1px solid color-mix(in srgb,var(--ok) 50%,var(--line));font-size:12px;font-weight:700;color:var(--ok)}
 .syncMini.warn,#syncBtn.warn{background:var(--rose);border-color:var(--rose);color:#fff}
 .syncMini:disabled,#syncBtn:disabled{opacity:.6}
-.transport{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.transport .btn{white-space:normal;line-height:1.2;font-size:13px}
+.transport{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.transport .btn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;min-height:44px;padding:0 8px;min-width:0}
+.transport #pauseBtn:disabled{opacity:.45;cursor:default}
+#modeBtn{flex-direction:column;gap:0;line-height:1.15}
+#modeBtn small{font-size:10px;font-weight:700;color:var(--muted)}
 @media (min-width:900px){
   body{padding-right:calc(330px + max(16px,env(safe-area-inset-right,0px)));padding-block:0 32px}
   .dock{left:auto;top:0;width:330px;border-top:none;border-left:1px solid var(--line);
     padding-top:calc(20px + env(safe-area-inset-top,0px));padding-left:16px}
-  .dock .in{height:100%;justify-content:space-between;gap:16px}
-  .dock .mixer{display:grid!important;flex:1;align-content:start;padding-top:8px;--rail-h:clamp(180px,calc(100vh - 330px),420px)}
+  .dock{overflow-y:auto}
+  .dock .in{min-height:100%;gap:14px}
+  .dock .mixer{display:grid!important;flex:1 1 auto;min-height:220px;grid-template-rows:minmax(0,1fr) auto;padding-top:4px}
+  .dock .fader{height:100%;min-height:0}
+  .dock .rail{flex:1 1 auto;height:auto;min-height:120px;max-height:420px}
   .dock-head h2{font-size:18px}
   .mixToggle{display:none}
   .mix-note{display:block}
-  .transport{grid-template-columns:1fr}
   .np-wave{height:72px}
-  .transport .btn{font-size:14px;min-height:48px}
+  .transport .btn{font-size:14px;min-height:46px}
 }
+.modal{position:fixed;inset:0;z-index:20;background:rgba(10,4,8,.72);display:flex;align-items:center;justify-content:center;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.sheet{width:min(420px,100%);background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:12px}
+.sheet .field{flex:none}
+.sheet .ctrls{justify-content:flex-end}
+.pw-err{color:var(--rose);font-weight:700}
 .toast{position:fixed;left:50%;top:calc(16px + env(safe-area-inset-top,0px));transform:translateX(-50%);background:var(--gold);color:#2a1508;font-weight:700;
   padding:8px 16px;border-radius:999px;z-index:9;font-size:14px;transition:opacity .3s;opacity:0;pointer-events:none;max-width:90vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toast.show{opacity:1}
@@ -223,16 +234,22 @@ button.pad:active{transform:scale(.96)}
   <section aria-labelledby="h-sync">
     <div class="sec-head"><h2 id="h-sync">同期</h2><span class="chip" id="saveChip">確認中</span></div>
     <p class="hint" id="syncNote"></p>
-    <form class="ctrls" id="syncForm" hidden autocomplete="off">
-      <input class="field" type="password" id="syncKey" placeholder="お店の同期パスワード" aria-label="同期パスワード">
-      <button class="btn gold" type="submit">接続</button>
-    </form>
     <div class="ctrls" id="syncCtrls" hidden>
-      <button class="btn gold" id="syncBtn">今すぐ同期</button>
+      <button class="btn gold" id="syncBtn">最新に更新</button>
     </div>
   </section>
 
 </main>
+
+<div class="modal" id="pwModal" hidden>
+  <form class="sheet" id="pwForm" autocomplete="off">
+    <h2>変更を送信</h2>
+    <p class="hint" id="pwInfo"></p>
+    <input class="field" type="password" id="pwInput" placeholder="お店の同期パスワード" aria-label="同期パスワード" autocomplete="off">
+    <p class="hint pw-err" id="pwErr" hidden></p>
+    <div class="ctrls"><button type="button" class="btn" id="pwCancel">キャンセル</button><button type="submit" class="btn gold" id="pwSend">送信</button></div>
+  </form>
+</div>
 
 <aside class="dock" id="dock" aria-label="ミキサー">
   <div class="in">
@@ -243,9 +260,10 @@ button.pad:active{transform:scale(.96)}
     </div>
     <div class="mixer" id="mixer"></div>
     <div class="transport">
+      <button class="btn gold" id="pauseBtn" disabled>⏸ 一時停止</button>
+      <button class="btn live" id="stopAll">■ 全停止</button>
       <button class="btn" id="modeBtn"></button>
       <button class="btn" id="fadeBtn">フェードアウト</button>
-      <button class="btn live" id="stopAll">全停止</button>
     </div>
   </div>
 </aside>
@@ -316,15 +334,15 @@ const probe = blob => new Promise(res => {
 // shared   = the shared library as last received from Cloudflare (before connecting: this device's own library)
 // outbox = changes made on this device that are not on Cloudflare yet; the 同期 button sends them
 // lib    = shared + outbox = what the screen shows
-let shared = emptyLib(), outbox = [], lib = emptyLib(), syncMode = 'local', syncKey = ls.get('syncKey', ''), etag = null, serverOk = false, syncing = false;
+let shared = emptyLib(), outbox = [], lib = emptyLib(), syncMode = 'local', etag = null, serverOk = false, syncing = false;
 const uploaded = new Set(ls.get('uploaded', []));
 const pending = new Set();
 let chain = Promise.resolve(); const serial = fn => (chain = chain.then(fn, fn));
 const clone = o => JSON.parse(JSON.stringify(o));
-const api = (path, opt = {}) => fetch('./api/' + path, { cache: 'no-store', ...opt, headers: { 'X-Store-Key': syncKey, ...(opt.headers || {}) } });
+const api = (path, opt = {}, key) => fetch('./api/' + path, { cache: 'no-store', ...opt, headers: { ...(key ? { 'X-Store-Key': key } : {}), ...(opt.headers || {}) } });
 // Cloudflare may turn an ETag into a weak one (W/"…") when it compresses; compare without the W/
 const tagOf = r => { const t = r.headers.get('x-lib-etag') || r.headers.get('etag'); return t ? t.replace(/^W\//, '') : null; };
-async function ping() { try { const r = await api('ping'); if (!r.ok) return null; const j = await r.json(); return j && j.ok ? j : null; } catch (e) { return null; } }
+async function ping(key) { try { const r = await api('ping', {}, key); if (!r.ok) return null; const j = await r.json(); return j && j.ok ? j : null; } catch (e) { return null; } }
 
 function applyOp(l, op) {
   const has = (k, id) => l[k].some(x => x.id === id);
@@ -346,7 +364,7 @@ function recompute() { lib = outbox.reduce((l, op) => applyOp(l, op), clone(shar
 // every edit lands on this device first; with sync on it also waits in the outbox for the 同期 button
 function mutate(op) {
   return serial(async () => {
-    if (syncKey) { outbox.push(op); await saveOutbox(); }
+    if (serverOk) { outbox.push(op); await saveOutbox(); }
     else { applyOp(shared, op); await local.saveLib(shared); }
     recompute();
   });
@@ -366,7 +384,7 @@ async function pullNow() {
 function dropFromOutbox(audio) {
   outbox.forEach(op => { if (op.t === 'add') { op.tracks = (op.tracks || []).filter(t => t.audio !== audio); op.sfx = (op.sfx || []).filter(x => x.audio !== audio); } });
 }
-async function pushNow() {
+async function pushNow(key) {
   if (!outbox.length) return 0;
   for (let attempt = 0; attempt < 6; attempt++) {
     let next = outbox.reduce((l, op) => applyOp(l, op), clone(shared));
@@ -377,7 +395,7 @@ async function pushNow() {
       const it = up[i]; const b = await local.getBlob(it.audio);
       if (!b) { dropFromOutbox(it.audio); retry = true; continue; }
       toast(`送信中 ${i + 1}/${up.length}：${it.name}`);
-      const r = await api('audio/' + it.audio, { method: 'PUT', body: b, headers: { 'Content-Type': b.type || 'application/octet-stream' } }).catch(() => null);
+      const r = await api('audio/' + it.audio, { method: 'PUT', body: b, headers: { 'Content-Type': b.type || 'application/octet-stream' } }, key).catch(() => null);
       if (!r) throw { code: 'net' };
       if (r.status === 413) { dropFromOutbox(it.audio); await saveOutbox(); recompute(); toast(`「${it.name}」は大きすぎて送れないため外しました（1つ100MBまで）`); retry = true; continue; }
       if (r.status === 401) throw { code: 'badkey' };
@@ -385,7 +403,7 @@ async function pushNow() {
       uploaded.add(it.audio); ls.set('uploaded', [...uploaded].slice(-500));
     }
     if (retry) { await saveOutbox(); continue; }
-    const r = await api('library', { method: 'PUT', headers: { 'If-Match': etag || '"empty"', 'Content-Type': 'application/json' }, body: JSON.stringify(next) }).catch(() => null);
+    const r = await api('library', { method: 'PUT', headers: { 'If-Match': etag || '"empty"', 'Content-Type': 'application/json' }, body: JSON.stringify(next) }, key).catch(() => null);
     if (!r) throw { code: 'net' };
     if (r.status === 412) { await pullNow(); continue; }
     if (r.status === 401) throw { code: 'badkey' };
@@ -395,37 +413,33 @@ async function pushNow() {
     const gone = [...shared.tracks, ...shared.sfx].map(x => x.audio).filter(a => a && !keep.has(a));
     etag = tagOf(r); shared = next; outbox = [];
     await local.saveLib(shared); await saveOutbox(); recompute();
-    gone.forEach(a => api('audio/' + a, { method: 'DELETE' }).catch(() => {}));
+    gone.forEach(a => api('audio/' + a, { method: 'DELETE' }, key).catch(() => {}));
     return sent;
   }
   throw { code: 'conflict' };
 }
 const syncErr = e => !e ? '同期できませんでした' : e.code === 'net' ? '同期サーバーにつながりません。ネット接続を確認してください'
-  : e.code === 'badkey' ? '同期パスワードが違います。入れ直してください'
+  : e.code === 'badkey' ? 'パスワードが違います。入れ直してください'
   : e.code === 'conflict' ? '他の端末と同時に更新されました。もう一度「同期」を押してください'
   : `同期できませんでした（エラー ${e.status || '不明'}）。もう一度押してください`;
 function syncNow(manual) {
+  if (!serverOk) return;
+  if (manual && outbox.length) { openPw(); return; }
   return serial(async () => {
-    if (!syncKey) return;
     syncing = true; paintSyncBtn();
     try {
-      if (!(await connect())) { if (manual) toast(syncErr({ code: syncMode === 'badkey' ? 'badkey' : 'net' })); return; }
-      await pullNow();
-      const sent = await pushNow();
-      ls.set('lastSync', Date.now()); failed.clear();
-      if (manual) toast(sent ? `同期しました（${sent}件の変更を送信）` : '同期しました（最新の状態です）');
-      fillMedia(true);
-    } catch (e) {
-      if (e && e.code === 'badkey') setSync('badkey'); else if (e && e.code === 'net') setSync('offline');
-      if (manual) toast(syncErr(e));
-    } finally { syncing = false; paintSyncBtn(); paintSync(); }
+      if (!(await connect())) { if (manual) toast(syncErr({ code: 'net' })); return; }
+      await pullNow(); failed.clear(); fillMedia(true);
+      if (manual) toast('最新の状態に更新しました');
+    } catch (e) { if (e && e.code === 'net') setSync('offline'); if (manual) toast(syncErr(e)); }
+    finally { syncing = false; paintSyncBtn(); paintSync(); }
   });
 }
 function autoPull() {
-  if (!syncKey || document.visibilityState !== 'visible' || syncing) return;
+  if (!serverOk || document.visibilityState !== 'visible' || syncing) return;
   serial(async () => {
     if (syncMode !== 'sync' && !(await connect())) return;
-    try { if (await pullNow()) fillMedia(true); } catch (e) { if (e && e.code === 'badkey') setSync('badkey'); else setSync('offline'); }
+    try { if (await pullNow()) fillMedia(true); } catch (e) { setSync('offline'); }
   });
 }
 async function download(id) {
@@ -456,7 +470,7 @@ async function fillMedia(gc) {
       let dl = 0;
       for (const it of need) {
         let blob = await local.getBlob(it.audio);
-        if (!blob && syncKey && syncMode !== 'offline') { dl++; toast(`クラウドから受信中 ${dl}`); blob = await download(it.audio); }
+        if (!blob && serverOk && syncMode !== 'offline') { dl++; toast(`クラウドから受信中 ${dl}`); blob = await download(it.audio); }
         if (!blob) { if (syncMode !== 'offline') failed.add(it.audio); buildView(); continue; }
         if (it.kind === 't') urlCache.set(it.audio, URL.createObjectURL(blob));
         else { const b = await decode(await blob.arrayBuffer(), it.name); if (b) bufCache.set(it.audio, b); else failed.add(it.audio); }
@@ -464,7 +478,7 @@ async function fillMedia(gc) {
       }
       if (dl) { toast('受信が終わりました'); paintChip(); }
     } while (refill);
-    if (gc && syncKey) {
+    if (gc && serverOk) {
       const keep = new Set([...lib.tracks, ...lib.sfx].map(x => x.audio));
       for (const id of (await local.blobIds()) || []) if (!keep.has(id) && !pending.has(id)) dropAudio(id);
     }
@@ -529,59 +543,80 @@ $('sfxFile').onchange = async e => {
 };
 
 // ---------- start ----------
+// Receiving is automatic and needs no password. Sending this device's changes asks for the shop password each time.
+const cloud = () => serverOk;
 async function paintChip() {
   const chip = $('saveChip');
-  const label = !syncKey ? (serverOk ? '未接続（この端末に保存）' : 'この端末に保存')
-    : { local: '未接続', sync: 'クラウド接続中', offline: 'オフライン', badkey: 'パスワード違い' }[syncMode];
-  chip.className = 'chip ' + (syncMode === 'offline' || syncMode === 'badkey' ? 'view' : 'cloud');
-  chip.textContent = label;
+  chip.textContent = !cloud() ? 'この端末に保存' : syncMode === 'offline' ? 'オフライン' : '自動受信中';
+  chip.className = 'chip ' + (syncMode === 'offline' ? 'view' : 'cloud');
 }
 function setSync(m) { syncMode = m; paintChip(); paintSync(); paintSyncBtn(); }
 const hhmm = t => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 function paintSyncBtn() {
   const n = outbox.length, mini = $('syncMini'), btn = $('syncBtn');
-  const txt = syncing ? '同期中…' : n ? `同期する（未送信${n}）` : '同期';
-  for (const b of [mini, btn]) { b.textContent = b === btn && !syncing && !n ? '今すぐ同期' : txt; b.classList.toggle('warn', !!n && !syncing); b.disabled = syncing; }
-  mini.hidden = !syncKey;
+  for (const b of [mini, btn]) {
+    b.textContent = syncing ? '同期中…' : n ? `送信する（未送信${n}）` : b === btn ? '最新に更新' : '同期';
+    b.classList.toggle('warn', !!n && !syncing); b.disabled = syncing;
+  }
+  mini.hidden = !cloud();
 }
 function paintSync() {
   const note = $('syncNote'), last = ls.get('lastSync', 0);
-  const needKey = !syncKey || syncMode === 'badkey';
-  $('syncForm').hidden = !serverOk || !needKey; $('syncCtrls').hidden = !syncKey;
-  if (!serverOk && !syncKey) { note.textContent = 'このアドレスでは同期が使えません。Cloudflare版のアドレスから開いてください。'; return; }
-  const lastTxt = last ? `最終同期：${hhmm(last)}。` : '';
-  note.textContent = !syncKey ? 'お店の同期パスワードを入れると、全端末で同じ音源を使えるようになります。'
-    : syncMode === 'badkey' ? 'お店の同期パスワードが違います。入れ直してください。'
-    : syncMode === 'offline' ? `ネットにつながっていません。編集はこの端末に保存され、つながったあと「同期」で送れます。${lastTxt}`
-    : `音源の追加・名前の変更・並べ替え・削除が終わったら「同期」を押すと、全端末に送られます。他の端末の変更は自動で受け取ります。${lastTxt}`;
+  $('syncCtrls').hidden = !cloud();
+  if (!cloud()) { note.textContent = 'このアドレスでは同期が使えません。Cloudflare版のアドレスから開いてください。'; return; }
+  const lastTxt = last ? `最終送信：${hhmm(last)}。` : '';
+  note.textContent = syncMode === 'offline'
+    ? `ネットにつながっていません。編集はこの端末に保存され、つながったあと送信できます。${lastTxt}`
+    : `他の端末の変更は自動で受け取ります。この端末で追加・名前の変更・並べ替え・削除をしたら「送信する」を押し、お店の同期パスワードを入れると全端末に届きます。${lastTxt}`;
 }
 async function connect() {
   const j = await ping(); if (j) ls.set('serverSeen', true);
-  serverOk = !!j || (!!syncKey && ls.get('serverSeen', false));
-  if (!j) { setSync(syncKey ? 'offline' : 'local'); return false; }
-  if (!syncKey) { setSync('local'); return false; }
-  if (!j.auth) { setSync('badkey'); return false; }
-  setSync('sync'); return true;
+  serverOk = !!j || ls.get('serverSeen', false);
+  setSync(j ? 'sync' : serverOk ? 'offline' : 'local');
+  return !!j;
 }
-// first connection on this device: queue everything it already has, then sync
+// the first time this device sees the shared library: queue what it already has so it can be sent
 async function mergeUp() {
   const mine = clone(shared);
   if (mine.calls.length || mine.sfx.length) outbox.push({ t: 'add', calls: mine.calls, tracks: mine.tracks, sfx: mine.sfx });
   shared = emptyLib(); etag = null; await local.saveLib(shared); await saveOutbox(); recompute();
   ls.set('merged', true);
 }
-$('syncForm').addEventListener('submit', async e => {
-  e.preventDefault(); const v = $('syncKey').value.trim(); if (!v) return;
-  const first = !syncKey;
-  syncKey = v; ls.set('syncKey', v); toast('接続しています');
-  if (await connect()) {
-    if (first && !ls.get('merged', false)) await mergeUp();
-    $('syncKey').value = ''; await syncNow(true);
-  } else toast(syncMode === 'badkey' ? 'パスワードが違います' : '同期サーバーにつながりません');
+// password sheet for sending
+const pw = { modal: $('pwModal'), form: $('pwForm'), input: $('pwInput'), err: $('pwErr'), info: $('pwInfo') };
+function openPw() {
+  pw.info.textContent = `この端末の未送信の変更（${outbox.length}件）を全端末に送ります。お店の同期パスワードを入れてください。`;
+  pw.err.hidden = true; pw.input.value = ''; pw.modal.hidden = false; setTimeout(() => pw.input.focus(), 50);
+}
+const closePw = () => { pw.modal.hidden = true; pw.input.value = ''; };
+$('pwCancel').onclick = closePw;
+pw.modal.addEventListener('pointerdown', e => { if (e.target === pw.modal) closePw(); });
+pw.form.addEventListener('submit', async e => {
+  e.preventDefault(); const key = pw.input.value; if (!key) return;
+  $('pwSend').disabled = true; pw.err.hidden = true;
+  const r = await sendWith(key);
+  $('pwSend').disabled = false;
+  if (r.ok) { closePw(); toast(r.sent ? `送信しました（${r.sent}件の変更）` : '送る変更はありませんでした'); }
+  else { pw.err.textContent = syncErr(r.e); pw.err.hidden = false; if (r.e && r.e.code === 'badkey') { pw.input.select(); } }
 });
+function sendWith(key) {
+  return serial(async () => {
+    syncing = true; paintSyncBtn();
+    try {
+      const j = await ping(key); if (!j) throw { code: 'net' }; if (!j.auth) throw { code: 'badkey' };
+      setSync('sync');
+      await pullNow();
+      const sent = await pushNow(key);
+      ls.set('lastSync', Date.now()); failed.clear(); fillMedia(true);
+      return { ok: true, sent };
+    } catch (e) { if (e && e.code === 'net') setSync('offline'); return { ok: false, e }; }
+    finally { syncing = false; paintSyncBtn(); paintSync(); }
+  });
+}
 $('syncBtn').onclick = () => syncNow(true);
 $('syncMini').onclick = () => syncNow(true);
 (async () => {
+  try { localStorage.removeItem('syncKey'); } catch (e) {}   // the password is no longer kept on the device
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
   try { shared = await local.loadLib(); } catch (e) { shared = emptyLib(); }
   try { outbox = await loadOutbox(); } catch (e) { outbox = []; }
@@ -590,13 +625,13 @@ $('syncMini').onclick = () => syncNow(true);
     if (!ls.get('merged', false)) await mergeUp();
     await serial(async () => { try { await pullNow(); } catch (e) {} });
     fillMedia(true);
-    if (outbox.length) toast(`未送信の変更が${outbox.length}件あります。「同期」を押してください`);
+    if (outbox.length) toast(`未送信の変更が${outbox.length}件あります。「送信する」で全端末に送れます`);
   }
   paintChip(); paintSync(); paintSyncBtn();
   setInterval(autoPull, 20000);
   document.addEventListener('visibilitychange', autoPull);
   addEventListener('online', autoPull);
-  addEventListener('offline', () => { if (syncKey) setSync('offline'); });
+  addEventListener('offline', () => { if (cloud()) setSync('offline'); });
 })();
 
 // ---------- install ----------
@@ -613,12 +648,12 @@ let cur = null;
 const MODES = { loop: 'リピート', next: '次の曲へ', stop: '止める' };
 let endMode = ls.get('endMode', 'loop'); if (!MODES[endMode]) endMode = 'loop';
 const modeBtn = $('modeBtn');
-const paintMode = () => { modeBtn.textContent = '曲の終わり：' + MODES[endMode]; };
+const paintMode = () => { modeBtn.innerHTML = '<small>曲の終わり</small>' + MODES[endMode]; };
 modeBtn.onclick = () => { const k = Object.keys(MODES); endMode = k[(k.indexOf(endMode) + 1) % k.length]; ls.set('endMode', endMode); paintMode(); if (cur) cur.a.loop = endMode === 'loop'; toast('曲の終わり：' + MODES[endMode]); };
 paintMode();
 function playTrack(c, t, fadeIn = .8) {
   unlock(); if (!t.url) return;
-  if (cur && cur.id === t.id) { stopTrack(1.5); return; }
+  if (cur && cur.id === t.id) { if (cur.paused) togglePause(); else stopTrack(1.5); return; }
   stopTrack(1.2);
   const a = new Audio(); a.preload = 'auto'; a.src = t.url; a.loop = endMode === 'loop';
   const node = ctx.createMediaElementSource(a);
@@ -634,6 +669,24 @@ function playTrack(c, t, fadeIn = .8) {
   };
   render();
 }
+function togglePause() {
+  if (!cur) return; unlock();
+  const p = cur, now = ctx.currentTime;
+  p.g.gain.cancelScheduledValues(now);
+  if (!p.paused) {
+    p.paused = true; p.g.gain.setValueAtTime(Math.max(p.g.gain.value, .0001), now); p.g.gain.exponentialRampToValueAtTime(.0001, now + .12);
+    setTimeout(() => { if (cur === p && p.paused) p.a.pause(); }, 140);
+  } else {
+    p.paused = false; p.a.play().catch(() => {}); p.g.gain.setValueAtTime(.0001, now); p.g.gain.exponentialRampToValueAtTime(1, now + .12);
+  }
+  npId = null; render();
+}
+let pauseShown = '';
+function paintPause() {
+  const st = !cur ? 'none' : cur.paused ? 'paused' : 'play'; if (st === pauseShown) return; pauseShown = st;
+  const b = $('pauseBtn'); b.disabled = st === 'none'; b.textContent = st === 'paused' ? '▶ 再開' : '⏸ 一時停止';
+}
+$('pauseBtn').onclick = togglePause;
 function teardown(p, delay) { setTimeout(() => { try { p.a.pause(); p.a.removeAttribute('src'); p.a.load(); p.node.disconnect(); p.g.disconnect(); } catch (e) {} }, delay); }
 function stopTrack(fade = .4) {
   if (!cur) return; const p = cur; const now = ctx.currentTime;
@@ -716,7 +769,7 @@ function draw() {
       const el = document.createElement(ed ? 'div' : 'button');
       el.className = 'trk' + (on ? ' playing' : '') + (!t.url && !t.loading ? ' missing' : ''); el.dataset.id = t.id;
       const dur = t.url ? (t.dur ? fmt(t.dur) : '--:--') : t.loading ? '読み込み中' : '読み込めません';
-      el.innerHTML = `<span class="slot"></span><canvas class="tw" data-tid="${t.id}" data-audio="${t.audio || ''}"></canvas><span class="dur">${on ? '♪ 再生中 · ' : ''}${dur}</span>`;
+      el.innerHTML = `<span class="slot"></span><canvas class="tw" data-tid="${t.id}" data-audio="${t.audio || ''}"></canvas><span class="dur">${on ? (cur.paused ? '⏸ 一時停止中 · ' : '♪ 再生中 · ') : ''}${dur}</span>`;
       const slot = el.querySelector('.slot');
       if (ed) {
         slot.replaceWith(renameInput(t.name, '曲の名前', v => rename('tracks', t.id, v)));
@@ -823,6 +876,7 @@ $('fadeBtn').onclick = () => {
 };
 document.addEventListener('keydown', e => {
   if (e.target.closest && (e.target.closest('.fader') || e.target.tagName === 'INPUT')) return;
+  if (e.code === 'Space' && !(e.target.closest && e.target.closest('button, input, textarea'))) { e.preventDefault(); togglePause(); return; }
   const n = +e.key; if (n >= 1 && n <= 9 && sfx[n - 1] && !editing) { const it = sfx[n - 1]; const p = $('pad-' + it.id); if (p) fire(it, p); }
 });
 
@@ -896,7 +950,7 @@ function paintNP() {
     return;
   }
   const t = lib.tracks.find(x => x.id === cur.id);
-  if (npId !== cur.id) { npId = cur.id; name.textContent = t ? '♪ ' + t.name : '♪'; }
+  if (npId !== cur.id) { npId = cur.id; name.textContent = (cur.paused ? '⏸ ' : '♪ ') + (t ? t.name : ''); }
   const d = cur.dur || cur.a.duration, now = cur.a.currentTime || 0, left = d && isFinite(d) ? Math.max(0, d - now) : 0;
   time.textContent = `${fmt(now)} / 残り ${fmt(left)}`; time.classList.toggle('soon', !!d && left < 10);
   drawWave(wave, t ? peaksCache.get(t.audio) : null, curProg(), true);
@@ -920,7 +974,7 @@ function burst(el) { if (reduce) return; const r = el.getBoundingClientRect(); f
 const data = new Uint8Array(analyser.fftSize);
 (function frame() {
   analyser.getByteTimeDomainData(data); let pk = 0; for (const v of data) pk = Math.max(pk, Math.abs(v - 128)); $('lvl').style.width = Math.min(100, pk / 1.1) + '%';
-  paintNP();
+  paintNP(); paintPause();
   if (!reduce && cur && Math.random() < .2) bubbles.push({ x: Math.random() * W, y: H + 5, r: 1 + Math.random() * 2.5, vy: .6 + Math.random() * 1.2, w: Math.random() * 6, a: .5 });
   cx.clearRect(0, 0, W, H);
   for (let i = bubbles.length - 1; i >= 0; i--) { const b = bubbles[i]; b.y -= b.vy; b.w += .05; b.x += Math.sin(b.w) * .4; b.a -= .006;

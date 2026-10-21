@@ -1,6 +1,7 @@
 // シャンパンコールDJ 同期サーバー（Cloudflare Workers + R2）
 // /api/* 以外は同じフォルダのアプリ本体（index.html など）をそのまま返す。
-// 認証: リクエストヘッダー X-Store-Key が、Cloudflareに登録したシークレット STORE_KEY と一致すること。
+// 受信（GET）はパスワード不要。送信・削除（PUT / DELETE）は、ヘッダー X-Store-Key が
+// Cloudflareに登録したシークレット STORE_KEY と一致すること。
 
 const LIB = 'library.json';
 const EMPTY_ETAG = '"empty"';
@@ -27,8 +28,10 @@ export default {
     const path = url.pathname.slice(5);
 
     if (path === 'ping') return json({ ok: true, configured: !!env.STORE_KEY, auth: authorized(req, env) });
-    if (!env.STORE_KEY) return json({ error: 'STORE_KEY が設定されていません' }, { status: 500 });
-    if (!authorized(req, env)) return json({ error: 'パスワードが違います' }, { status: 401 });
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      if (!env.STORE_KEY) return json({ error: 'STORE_KEY が設定されていません' }, { status: 500 });
+      if (!authorized(req, env)) return json({ error: 'パスワードが違います' }, { status: 401 });
+    }
 
     // 曲や効果音の一覧（名前・順番など）
     if (path === 'library') {
