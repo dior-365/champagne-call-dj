@@ -188,7 +188,7 @@ button.pad:active{transform:scale(.96)}
 
 <canvas id="fizz"></canvas>
 <div class="toast" id="toast"></div>
-<input type="file" id="addTrackFile" accept="audio/*" multiple hidden>
+<input type="file" id="addTrackFile" accept="audio/*,audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/aac,audio/wav,audio/x-wav,video/mp4,.mp3,.m4a,.mp4,.aac,.wav,.aif,.aiff,.caf" multiple hidden>
 <main>
   <header>
     <div>
@@ -210,7 +210,7 @@ button.pad:active{transform:scale(.96)}
     </div>
     <div class="ctrls canEdit">
       <label class="btn gold" for="callFile">＋ コールを追加</label>
-      <input type="file" id="callFile" accept="audio/*" multiple hidden>
+      <input type="file" id="callFile" accept="audio/*,audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/aac,audio/wav,audio/x-wav,video/mp4,.mp3,.m4a,.mp4,.aac,.wav,.aif,.aiff,.caf" multiple hidden>
       <label class="btn" for="callDir">フォルダからまとめて</label>
       <input type="file" id="callDir" webkitdirectory multiple hidden>
     </div>
@@ -224,7 +224,7 @@ button.pad:active{transform:scale(.96)}
       <div class="ctrls">
         <button class="btn editBtn canEdit" aria-pressed="false">編集</button>
         <label class="btn gold canEdit" for="sfxFile">＋ 取り込む</label>
-        <input type="file" id="sfxFile" accept="audio/*" multiple hidden>
+        <input type="file" id="sfxFile" accept="audio/*,audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/aac,audio/wav,audio/x-wav,video/mp4,.mp3,.m4a,.mp4,.aac,.wav,.aif,.aiff,.caf" multiple hidden>
       </div>
     </div>
     <div class="pads" id="pads"></div>
@@ -290,8 +290,8 @@ const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2,
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const base = n => n.replace(/\.[^.]+$/, '');
 const natural = (a, b) => a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
-const isAudio = f => (f.type && f.type.startsWith('audio/')) || /\.(mp3|m4a|aac|wav|ogg|flac|aif|aiff)$/i.test(f.name);
-const decode = async (data, name) => { try { return await ctx.decodeAudioData(data.slice(0)); } catch (e) { toast(`「${name}」は読み込めない形式です`); return null; } };
+const isAudio = f => (f.type && (f.type.startsWith('audio/') || f.type === 'video/mp4')) || /\.(mp3|m4a|mp4|aac|wav|ogg|opus|flac|aif|aiff|caf)$/i.test(f.name);
+const decode = async (data, name, quiet) => { try { return await new Promise((res, rej) => { const p = ctx.decodeAudioData(data.slice(0), res, rej); if (p && p.then) p.then(res, rej); }); } catch (e) { if (!quiet) toast(`「${name}」は読み込めない形式です`); return null; } };
 
 function openIDB(name, ver, stores) {
   let p; try { p = new Promise((res, rej) => { const r = indexedDB.open(name, ver);
@@ -451,13 +451,13 @@ function dropAudio(id) { if (!id) return; local.delBlob(id); revoke(id); idb(LDB
 // ---------- view (what the screen shows) ----------
 let calls = [], sfx = [], editing = false;
 const canEdit = () => true;
-const urlCache = new Map(), bufCache = new Map(), failed = new Set();
-const revoke = id => { const u = urlCache.get(id); if (u) URL.revokeObjectURL(u); urlCache.delete(id); bufCache.delete(id); };
+const urlCache = new Map(), bufCache = new Map(), failed = new Set(), elMode = new Set();
+const revoke = id => { const u = urlCache.get(id); if (u) URL.revokeObjectURL(u); urlCache.delete(id); bufCache.delete(id); elMode.delete(id); };
 const byOrder = (a, b) => (a.order || 0) - (b.order || 0) || natural(a.name, b.name);
 function buildView() {
   calls = lib.calls.slice().sort(byOrder).map(c => ({ ...c, tracks: lib.tracks.filter(t => t.callId === c.id).sort(byOrder)
     .map(t => ({ ...t, url: urlCache.get(t.audio) || null, loading: !urlCache.has(t.audio) && !failed.has(t.audio) })) }));
-  sfx = lib.sfx.slice().sort(byOrder).map(x => ({ ...x, buffer: bufCache.get(x.audio) || null, loading: !bufCache.has(x.audio) && !failed.has(x.audio) }));
+  sfx = lib.sfx.slice().sort(byOrder).map(x => ({ ...x, buffer: bufCache.get(x.audio) || null, url: elMode.has(x.audio) ? urlCache.get(x.audio) : null, loading: !bufCache.has(x.audio) && !elMode.has(x.audio) && !failed.has(x.audio) }));
   render();
 }
 let filling = false, refill = false;
@@ -466,14 +466,14 @@ async function fillMedia(gc) {
   try {
     do {
       refill = false;
-      const need = [...lib.tracks.map(t => ({ ...t, kind: 't' })), ...lib.sfx.map(x => ({ ...x, kind: 's' }))].filter(x => x.audio && !(x.kind === 't' ? urlCache.has(x.audio) : bufCache.has(x.audio)) && !failed.has(x.audio));
+      const need = [...lib.tracks.map(t => ({ ...t, kind: 't' })), ...lib.sfx.map(x => ({ ...x, kind: 's' }))].filter(x => x.audio && !(x.kind === 't' ? urlCache.has(x.audio) : bufCache.has(x.audio) || elMode.has(x.audio)) && !failed.has(x.audio));
       let dl = 0;
       for (const it of need) {
         let blob = await local.getBlob(it.audio);
         if (!blob && serverOk && syncMode !== 'offline') { dl++; toast(`クラウドから受信中 ${dl}`); blob = await download(it.audio); }
         if (!blob) { if (syncMode !== 'offline') failed.add(it.audio); buildView(); continue; }
         if (it.kind === 't') urlCache.set(it.audio, URL.createObjectURL(blob));
-        else { const b = await decode(await blob.arrayBuffer(), it.name); if (b) bufCache.set(it.audio, b); else failed.add(it.audio); }
+        else { const b = await decode(await blob.arrayBuffer(), it.name, true); if (b) bufCache.set(it.audio, b); else if ((await probe(blob)) != null) { urlCache.set(it.audio, URL.createObjectURL(blob)); elMode.add(it.audio); } else failed.add(it.audio); }
         buildView();
       }
       if (dl) { toast('受信が終わりました'); paintChip(); }
@@ -532,10 +532,13 @@ $('sfxFile').onchange = async e => {
   const items = []; let o = Date.now();
   for (const f of fs) {
     toast(`保存中: ${f.name}`);
-    const b = await decode(await f.arrayBuffer(), f.name); if (!b) continue;
+    const b = await decode(await f.arrayBuffer(), f.name, true);
+    const dur = b ? b.duration : await probe(f);
+    if (!b && dur == null) { toast(`「${f.name}」はこの端末で再生できない形式です`); continue; }
     const aid = uid();
     try { pending.add(aid); await local.putBlob(aid, f); } catch (err) { toast(errMsg(err)); pending.delete(aid); break; }
-    bufCache.set(aid, b); items.push({ id: uid(), name: base(f.name), order: o++, audio: aid });
+    if (b) bufCache.set(aid, b); else { urlCache.set(aid, URL.createObjectURL(f)); elMode.add(aid); }
+    items.push({ id: uid(), name: base(f.name), order: o++, audio: aid });
   }
   if (!items.length) return;
   try { await mutate({ t: 'add', sfx: items }); toast(`${items.length}件の効果音を取り込みました`); paintChip(); }
@@ -694,14 +697,21 @@ function stopTrack(fade = .4) {
   teardown(p, fade * 1000 + 80); cur = null; render();
 }
 const voices = new Map();
+const liveEls = new Set();
 function fire(it, el) {
-  unlock(); if (!it.buffer) return;
-  const src = ctx.createBufferSource(); src.buffer = it.buffer; src.connect(sfxBus); src.start();
+  unlock(); if (!it.buffer && !it.url) return;
+  const done = () => { const n = (voices.get(it.id) || 1) - 1; voices.set(it.id, n); if (!n) { const p = $('pad-' + it.id); if (p) p.classList.remove('active'); } };
+  if (it.buffer) {
+    const src = ctx.createBufferSource(); src.buffer = it.buffer; src.connect(sfxBus); src.start(); src.onended = done;
+  } else {
+    const a = new Audio(it.url); a.preload = 'auto'; const node = ctx.createMediaElementSource(a); node.connect(sfxBus); liveEls.add(a);
+    a.onended = () => { liveEls.delete(a); try { node.disconnect(); } catch (e) {} done(); };
+    a.play().catch(() => { liveEls.delete(a); done(); });
+  }
   voices.set(it.id, (voices.get(it.id) || 0) + 1); el.classList.add('active');
-  src.onended = () => { const n = (voices.get(it.id) || 1) - 1; voices.set(it.id, n); if (!n) { const p = $('pad-' + it.id); if (p) p.classList.remove('active'); } };
   el.classList.remove('hit'); void el.offsetWidth; el.classList.add('hit'); burst(el);
 }
-function stopSfx() { sfxBus.disconnect(); sfxBus = ctx.createGain(); sfxBus.gain.value = mix.sfx / 100; sfxBus.connect(bass); voices.clear(); document.querySelectorAll('.pad.active').forEach(p => p.classList.remove('active')); }
+function stopSfx() { liveEls.forEach(a => { try { a.pause(); } catch (e) {} }); liveEls.clear(); sfxBus.disconnect(); sfxBus = ctx.createGain(); sfxBus.gain.value = mix.sfx / 100; sfxBus.connect(bass); voices.clear(); document.querySelectorAll('.pad.active').forEach(p => p.classList.remove('active')); }
 
 // ---------- edit actions ----------
 function renameInput(value, label, onSave) {
@@ -787,7 +797,7 @@ function draw() {
   if (!sfx.length) pads.innerHTML = canEdit() ? '<div class="empty">効果音をまだ取り込んでいません。<br>「＋ 取り込む」で複数まとめて選ぶと、1つずつパッドになります。</div>' : '<div class="empty">まだ効果音が登録されていません。</div>';
   sfx.forEach((it, i) => {
     const el = document.createElement(ed ? 'div' : 'button'); el.className = 'pad' + (voices.get(it.id) ? ' active' : ''); el.id = 'pad-' + it.id;
-    const len = it.buffer ? it.buffer.duration.toFixed(1) + 's' : it.loading ? '…' : '×';
+    const len = it.buffer ? it.buffer.duration.toFixed(1) + 's' : it.url ? '♪' : it.loading ? '…' : '×';
     el.innerHTML = `<span class="meta"><span>${i < 9 ? i + 1 : ''}</span><span>${len}</span></span><span class="slot"></span>`;
     const slot = el.querySelector('.slot');
     if (ed) {
