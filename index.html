@@ -271,16 +271,54 @@ button.pad:active{transform:scale(.96)}
 <script>
 (() => {
 const $ = id => document.getElementById(id);
-const ctx = new (window.AudioContext || window.webkitAudioContext)();
+// ---------- audio engine ----------
+// iPhone stops a page's audio when the app goes to the background and does not always bring it back.
+// So on iPhone, the first touch after coming back builds a fresh audio engine.
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const AC = window.AudioContext || window.webkitAudioContext;
+const setSession = () => { try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {} };
+setSession();
+let ctx, bass, master, lim, analyser, callBus, sfxBus, staleAudio = false;
+function buildAudio() {
+  ctx = new AC();
+  bass = ctx.createBiquadFilter(); bass.type = 'lowshelf'; bass.frequency.value = 110;
+  master = ctx.createGain();
+  lim = ctx.createDynamicsCompressor(); lim.threshold.value = -3; lim.ratio.value = 12; lim.attack.value = .003; lim.release.value = .15;
+  analyser = ctx.createAnalyser(); analyser.fftSize = 512;
+  bass.connect(master); master.connect(lim); lim.connect(analyser); analyser.connect(ctx.destination);
+  callBus = ctx.createGain(); callBus.connect(bass);
+  sfxBus = ctx.createGain(); sfxBus.connect(bass);
+}
+buildAudio();
+function rebuildAudio() {
+  const old = ctx;
+  // keep the song that was playing: move it onto the new engine, paused at the same spot
+  if (cur) {
+    const p = cur, pos = p.a.currentTime || 0, src = p.a.src, loop = p.a.loop, onend = p.a.onended;
+    try { p.a.pause(); p.node.disconnect(); } catch (e) {}
+    buildAudio();
+    const a = new Audio(); a.preload = 'auto'; a.src = src; a.loop = loop; a.onended = onend;
+    a.addEventListener('loadedmetadata', () => { try { a.currentTime = pos; } catch (e) {} }, { once: true });
+    const node = ctx.createMediaElementSource(a), g = ctx.createGain(); node.connect(g); g.connect(callBus);
+    Object.assign(p, { a, node, g, paused: true });
+    npId = null;
+  } else buildAudio();
+  liveEls.forEach(a => { try { a.pause(); } catch (e) {} }); liveEls.clear(); voices.clear();
+  FADERS.forEach(f => apply(f.k));
+  try { old.close(); } catch (e) {}
+  render();
+}
 
-const bass = ctx.createBiquadFilter(); bass.type = 'lowshelf'; bass.frequency.value = 110;
-const master = ctx.createGain();
-const lim = ctx.createDynamicsCompressor(); lim.threshold.value = -3; lim.ratio.value = 12; lim.attack.value = .003; lim.release.value = .15;
-const analyser = ctx.createAnalyser(); analyser.fftSize = 512;
-bass.connect(master); master.connect(lim); lim.connect(analyser); analyser.connect(ctx.destination);
-const callBus = ctx.createGain(); callBus.connect(bass);
-let sfxBus = ctx.createGain(); sfxBus.connect(bass);
-const unlock = () => { if (ctx.state !== 'running') ctx.resume(); };
+function unlock() {
+  setSession();
+  if (IOS && (staleAudio || ctx.state === 'interrupted' || ctx.state === 'closed')) { staleAudio = false; rebuildAudio(); }
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
+}
+// leaving the app on iPhone: rebuild on return, and show the song as paused so 再開 continues it
+function leaving() { if (!IOS) return; staleAudio = true; if (cur && !cur.paused) { cur.paused = true; try { cur.a.pause(); } catch (e) {} } }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') leaving(); });
+addEventListener('pagehide', leaving);
+addEventListener('pageshow', e => { if (e.persisted && IOS) staleAudio = true; });
 document.addEventListener('pointerdown', unlock, true);
 document.addEventListener('keydown', unlock, true);
 
@@ -667,7 +705,7 @@ function playTrack(c, t, fadeIn = .8) {
   a.onended = () => {
     if (cur !== me) return;
     if (endMode === 'next') { const list = (calls.find(x => x.id === me.cid) || c).tracks; const nx = list[list.findIndex(x => x.id === me.id) + 1];
-      if (nx && nx.url) { me.id = nx.id; me.dur = nx.dur || 0; a.src = nx.url; a.loop = false; a.play().catch(() => {}); render(); return; } }
+      if (nx && nx.url) { me.id = nx.id; me.dur = nx.dur || 0; me.a.src = nx.url; me.a.loop = false; me.a.play().catch(() => {}); render(); return; } }
     cur = null; teardown(me, 0); render();
   };
   render();
@@ -981,7 +1019,7 @@ const cv = $('fizz'), cx = cv.getContext('2d'); let W, H; const bubbles = [];
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const size = () => { const r = devicePixelRatio || 1; W = innerWidth; H = innerHeight; cv.width = W * r; cv.height = H * r; cx.setTransform(r, 0, 0, r, 0, 0); }; size(); addEventListener('resize', size);
 function burst(el) { if (reduce) return; const r = el.getBoundingClientRect(); for (let i = 0; i < 24; i++) bubbles.push({ x: r.left + Math.random() * r.width, y: r.top + r.height * (.4 + Math.random() * .6), r: 1.5 + Math.random() * 4, vy: 1 + Math.random() * 3, w: Math.random() * 6, a: 1 }); }
-const data = new Uint8Array(analyser.fftSize);
+let data = new Uint8Array(512);
 (function frame() {
   analyser.getByteTimeDomainData(data); let pk = 0; for (const v of data) pk = Math.max(pk, Math.abs(v - 128)); $('lvl').style.width = Math.min(100, pk / 1.1) + '%';
   paintNP(); paintPause();
