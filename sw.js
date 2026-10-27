@@ -1,5 +1,5 @@
 // オフライン用キャッシュ。アプリを更新したら VERSION を上げる。
-const VERSION = 'ccdj-v15';
+const VERSION = 'ccdj-v16';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-64.png'];
 
 self.addEventListener('install', e => {
@@ -15,7 +15,7 @@ self.addEventListener('fetch', e => {
   if (url.origin === location.origin && url.pathname.includes('/api/')) return; // 同期通信はキャッシュしない
   // 画面本体は最新を優先し、オフライン時はキャッシュ
   if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).then(res => { const copy = res.clone(); caches.open(VERSION).then(c => c.put('./index.html', copy)); return res; })
+    e.respondWith(fetch(req.url, { cache: 'no-store', credentials: 'same-origin' }).then(res => { const copy = res.clone(); caches.open(VERSION).then(c => c.put('./index.html', copy)); return res; })
       .catch(() => caches.match('./index.html')));
     return;
   }

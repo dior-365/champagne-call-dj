@@ -240,7 +240,7 @@ button.pad:active{transform:scale(.96)}
     </div>
   </section>
 
-  <p class="ver" id="ver">CALL DJ v15</p>
+  <p class="ver" id="ver">CALL DJ v16</p>
 </main>
 
 <div class="modal" id="pwModal" hidden>
@@ -692,6 +692,18 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (!hadCtrl) return; if (!cur) location.reload(); else { reloadWhenIdle = true; toast('新しい版があります。曲を止めると更新します'); } });
   setInterval(() => { if (reloadWhenIdle && !cur) location.reload(); }, 2000);
 }
+// Also ask the server directly which version is current (works even if the phone kept an old copy)
+const APP_VER = 16;
+async function checkVersion() {
+  try {
+    const r = await fetch('./index.html?check=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
+    const m = (await r.text()).match(/CALL DJ v(\d+)/); const v = m ? +m[1] : 0;
+    if (v > APP_VER) { if (!cur) location.replace('./?v=' + v); else toast('新しい版があります。曲を止めると更新します'); }
+  } catch (e) {}
+}
+addEventListener('load', () => setTimeout(checkVersion, 1500));
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkVersion(); });
+setInterval(() => { if (!cur && document.visibilityState === 'visible') checkVersion(); }, 60000);
 
 // ---------- playback ----------
 let cur = null;
