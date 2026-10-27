@@ -692,13 +692,13 @@ const modeBtn = $('modeBtn');
 const paintMode = () => { modeBtn.innerHTML = '<small>曲の終わり</small>' + MODES[endMode]; };
 modeBtn.onclick = () => { const k = Object.keys(MODES); endMode = k[(k.indexOf(endMode) + 1) % k.length]; ls.set('endMode', endMode); paintMode(); if (cur) cur.a.loop = endMode === 'loop'; toast('曲の終わり：' + MODES[endMode]); };
 paintMode();
-function playTrack(c, t, fadeIn = .8) {
+function playTrack(c, t) {
   unlock(); if (!t.url) return;
   if (cur && cur.id === t.id) { if (cur.paused) togglePause(); else stopTrack(1.5); return; }
   stopTrack(1.2);
   const a = new Audio(); a.preload = 'auto'; a.src = t.url; a.loop = endMode === 'loop';
   const node = ctx.createMediaElementSource(a);
-  const g = ctx.createGain(); const now = ctx.currentTime; g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(1, now + fadeIn);
+  const g = ctx.createGain(); g.gain.value = 1; // start at full volume, no fade-in
   node.connect(g); g.connect(callBus);
   const me = { id: t.id, cid: c.id, a, g, node, dur: t.dur || 0 }; cur = me;
   a.play().catch(() => { if (cur === me) { cur = null; render(); } toast('再生できませんでした'); });
