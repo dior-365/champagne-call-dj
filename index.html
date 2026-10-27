@@ -12,6 +12,7 @@
 <link rel="icon" type="image/png" href="icons/favicon-64.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <title>CALL DJ</title>
+<meta name="app-version" content="17">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&family=JetBrains+Mono:wght@500&display=swap">
@@ -133,7 +134,7 @@ button.pad:active{transform:scale(.96)}
 .fl{font-weight:700;font-size:12px;text-align:center}
 .mix-note{grid-column:1/-1;color:var(--muted);font-size:12px;text-align:center;margin:4px 0 0;display:none}
 .hint{color:var(--muted);font-size:12px;margin:0}
-.ver{color:var(--muted);font-size:11px;font-family:var(--font-mono);margin:0;opacity:.7}
+.ver{color:var(--muted);font-size:12px;font-family:var(--font-mono);letter-spacing:0;vertical-align:middle;margin-left:6px}
 /* Dock: mixer + transport, always on screen. Phone: bottom sheet. PC: right-hand panel. */
 .dock{position:fixed;left:0;right:0;bottom:0;z-index:5;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(10px);
   border-top:1px solid var(--line);padding-top:6px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));
@@ -193,7 +194,7 @@ button.pad:active{transform:scale(.96)}
 <main>
   <header>
     <div>
-      <h1><span>CALL</span> DJ</h1>
+      <h1><span>CALL</span> DJ <small class="ver" id="ver">v17</small></h1>
     </div>
     <div class="hright">
       <button class="btn sm gold" id="installBtn" hidden>アプリとしてインストール</button>
@@ -240,7 +241,6 @@ button.pad:active{transform:scale(.96)}
     </div>
   </section>
 
-  <p class="ver" id="ver">CALL DJ v16</p>
 </main>
 
 <div class="modal" id="pwModal" hidden>
@@ -693,11 +693,11 @@ if ('serviceWorker' in navigator) {
   setInterval(() => { if (reloadWhenIdle && !cur) location.reload(); }, 2000);
 }
 // Also ask the server directly which version is current (works even if the phone kept an old copy)
-const APP_VER = 16;
+const APP_VER = 17;
 async function checkVersion() {
   try {
     const r = await fetch('./index.html?check=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
-    const m = (await r.text()).match(/CALL DJ v(\d+)/); const v = m ? +m[1] : 0;
+    const m = (await r.text()).match(/name="app-version" content="(\d+)"/); const v = m ? +m[1] : 0;
     if (v > APP_VER) { if (!cur) location.replace('./?v=' + v); else toast('新しい版があります。曲を止めると更新します'); }
   } catch (e) {}
 }
