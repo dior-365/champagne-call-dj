@@ -133,6 +133,7 @@ button.pad:active{transform:scale(.96)}
 .fl{font-weight:700;font-size:12px;text-align:center}
 .mix-note{grid-column:1/-1;color:var(--muted);font-size:12px;text-align:center;margin:4px 0 0;display:none}
 .hint{color:var(--muted);font-size:12px;margin:0}
+.ver{color:var(--muted);font-size:11px;font-family:var(--font-mono);margin:0;opacity:.7}
 /* Dock: mixer + transport, always on screen. Phone: bottom sheet. PC: right-hand panel. */
 .dock{position:fixed;left:0;right:0;bottom:0;z-index:5;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(10px);
   border-top:1px solid var(--line);padding-top:6px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));
@@ -239,6 +240,7 @@ button.pad:active{transform:scale(.96)}
     </div>
   </section>
 
+  <p class="ver" id="ver">CALL DJ v15</p>
 </main>
 
 <div class="modal" id="pwModal" hidden>
@@ -283,7 +285,7 @@ function buildAudio() {
   ctx = new AC();
   bass = ctx.createBiquadFilter(); bass.type = 'lowshelf'; bass.frequency.value = 110;
   master = ctx.createGain();
-  lim = ctx.createDynamicsCompressor(); lim.threshold.value = -3; lim.ratio.value = 12; lim.attack.value = .003; lim.release.value = .15;
+  lim = ctx.createDynamicsCompressor(); lim.threshold.value = -1; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = .001; lim.release.value = .1;
   analyser = ctx.createAnalyser(); analyser.fftSize = 512;
   bass.connect(master); master.connect(lim); lim.connect(analyser); analyser.connect(ctx.destination);
   callBus = ctx.createGain(); callBus.connect(bass);
@@ -682,7 +684,14 @@ $('installBtn').onclick = async () => { if (!installEvt) return; installEvt.prom
 addEventListener('appinstalled', () => { $('installBtn').hidden = true; toast('インストールしました'); });
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
 if (!standalone && /iPhone|iPad|iPod/.test(navigator.userAgent)) $('iosHint').hidden = false;
-if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+if ('serviceWorker' in navigator) {
+  const hadCtrl = !!navigator.serviceWorker.controller; let reloadWhenIdle = false;
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js').then(reg => {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  }).catch(() => {}));
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!hadCtrl) return; if (!cur) location.reload(); else { reloadWhenIdle = true; toast('新しい版があります。曲を止めると更新します'); } });
+  setInterval(() => { if (reloadWhenIdle && !cur) location.reload(); }, 2000);
+}
 
 // ---------- playback ----------
 let cur = null;
@@ -715,10 +724,10 @@ function togglePause() {
   const p = cur, now = ctx.currentTime;
   p.g.gain.cancelScheduledValues(now);
   if (!p.paused) {
-    p.paused = true; p.g.gain.setValueAtTime(Math.max(p.g.gain.value, .0001), now); p.g.gain.exponentialRampToValueAtTime(.0001, now + .12);
-    setTimeout(() => { if (cur === p && p.paused) p.a.pause(); }, 140);
+    p.paused = true; p.g.gain.setValueAtTime(Math.max(p.g.gain.value, .0001), now); p.g.gain.exponentialRampToValueAtTime(.0001, now + .03);
+    setTimeout(() => { if (cur === p && p.paused) p.a.pause(); }, 50);
   } else {
-    p.paused = false; p.a.play().catch(() => {}); p.g.gain.setValueAtTime(.0001, now); p.g.gain.exponentialRampToValueAtTime(1, now + .12);
+    p.paused = false; p.a.play().catch(() => {}); p.g.gain.setValueAtTime(.0001, now); p.g.gain.exponentialRampToValueAtTime(1, now + .03);
   }
   npId = null; render();
 }
